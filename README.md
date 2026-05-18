@@ -7,14 +7,6 @@ HiveMind clients connect to a `hivemind-core` listener, and this plugin forwards
 Mycroft `Message` payloads to a local OVOS bus (and routes OVOS responses back to the
 originating client).
 
-## Why a separate package?
-
-This code previously shipped inside `ovos-bus-client` as `ovos_bus_client.hpm`. That mixed
-roles: `ovos-bus-client` is a foundational library used across the OVOS ecosystem, and it
-had no business importing `hivemind-core` and `hivemind-bus-client` to expose a HiveMind
-plugin. Dependency direction now goes the right way: HiveMind plugins depend on
-`ovos-bus-client`, never the reverse.
-
 ## Installation
 
 ```bash
@@ -76,19 +68,6 @@ The plugin owns two callbacks on the OVOS bus:
 Upstream traffic (client → OVOS bus) is handled by `hivemind-core` itself; this plugin
 only handles the downstream half.
 
-## Migration from `ovos-bus-client[hivemind]`
-
-If you were previously installing `ovos-bus-client[hivemind]` to get HiveMind support,
-switch to:
-
-```bash
-pip uninstall ovos-bus-client  # only if you had the hivemind extra installed
-pip install hivemind-ovos-agent-plugin
-```
-
-The legacy entry point name `hivemind-ovos-agent-plugin` is preserved, so existing
-`hivemind-core` configs keep working. The legacy class name `OVOSProtocol` is preserved
-as an alias for `OVOSAgentProtocol` to avoid breaking imports.
 
 ## Documentation
 
