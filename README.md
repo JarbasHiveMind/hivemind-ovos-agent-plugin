@@ -1,0 +1,105 @@
+# HiveMind OVOS Agent Plugin
+
+OVOS agent protocol plugin for [HiveMind-core](https://github.com/JarbasHiveMind/HiveMind-core).
+
+Bridges HiveMind client messages to an [OpenVoiceOS](https://github.com/OpenVoiceOS) message bus.
+HiveMind clients connect to a `hivemind-core` listener, and this plugin forwards their
+Mycroft `Message` payloads to a local OVOS bus (and routes OVOS responses back to the
+originating client).
+
+## Why a separate package?
+
+This code previously shipped inside `ovos-bus-client` as `ovos_bus_client.hpm`. That mixed
+roles: `ovos-bus-client` is a foundational library used across the OVOS ecosystem, and it
+had no business importing `hivemind-core` and `hivemind-bus-client` to expose a HiveMind
+plugin. Dependency direction now goes the right way: HiveMind plugins depend on
+`ovos-bus-client`, never the reverse.
+
+## Installation
+
+```bash
+pip install hivemind-ovos-agent-plugin
+```
+
+Or from source:
+
+```bash
+git clone https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin
+cd hivemind-ovos-agent-plugin
+pip install -e .
+```
+
+## Usage
+
+The plugin registers itself as a HiveMind agent protocol via the
+`hivemind.agent.protocol` entry point group, with name `hivemind-ovos-agent-plugin`.
+
+In your `hivemind-core` configuration:
+
+```json
+{
+  "agent_protocol": {
+    "hivemind-ovos-agent-plugin": {
+      "host": "127.0.0.1",
+      "port": 8181
+    }
+  }
+}
+```
+
+`hivemind-core` will discover the plugin via its entry point and instantiate the
+`OVOSAgentProtocol` class with the supplied config. The plugin connects to the OVOS
+message bus at the given host/port (defaulting to `127.0.0.1:8181`).
+
+### Direct programmatic use
+
+```python
+from hivemind_ovos_agent_plugin import OVOSAgentProtocol
+
+agent = OVOSAgentProtocol(config={"host": "127.0.0.1", "port": 8181})
+# pass `agent` to your HiveMindListenerProtocol
+```
+
+## How it works
+
+The plugin owns two callbacks on the OVOS bus:
+
+- **`hive.send.downstream`** — emitted by OVOS components that want to push a
+  `HiveMessage` to a connected HiveMind client. The plugin wraps the payload in a
+  `HiveMessage` and dispatches it to the right peer, or fans it out for
+  `PROPAGATE`/`BROADCAST` types.
+- **`message`** (catch-all) — every internal OVOS bus message is inspected. If its
+  `context["destination"]` lists a connected HiveMind peer, the plugin forwards it back
+  to that peer wrapped as a `HiveMessageType.BUS` message. This is where **client
+  isolation** is enforced: a client never sees responses meant for another client.
+
+Upstream traffic (client → OVOS bus) is handled by `hivemind-core` itself; this plugin
+only handles the downstream half.
+
+## Migration from `ovos-bus-client[hivemind]`
+
+If you were previously installing `ovos-bus-client[hivemind]` to get HiveMind support,
+switch to:
+
+```bash
+pip uninstall ovos-bus-client  # only if you had the hivemind extra installed
+pip install hivemind-ovos-agent-plugin
+```
+
+The legacy entry point name `hivemind-ovos-agent-plugin` is preserved, so existing
+`hivemind-core` configs keep working. The legacy class name `OVOSProtocol` is preserved
+as an alias for `OVOSAgentProtocol` to avoid breaking imports.
+
+## Documentation
+
+Full developer documentation lives in [`docs/`](docs/):
+
+- [`docs/architecture.md`](docs/architecture.md) — how the plugin fits between HiveMind
+  and OVOS.
+- [`docs/configuration.md`](docs/configuration.md) — every config knob.
+- [`docs/message_flow.md`](docs/message_flow.md) — end-to-end message lifecycle.
+- [`docs/development.md`](docs/development.md) — running tests, releasing.
+
+## License
+
+Apache 2.0. See [LICENSE.md](LICENSE.md).

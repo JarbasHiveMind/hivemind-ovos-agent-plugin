@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hivemind-ovos-agent-plugin"
+dynamic = ["version"]
+description = "OVOS agent protocol plugin for HiveMind-core"
+license = { text = "Apache-2.0" }
+readme = "README.md"
+authors = [
+    { name = "jarbasAi", email = "jarbasai@mailfence.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "ovos-bus-client>=1.3.1,<2.0.0",
+    "ovos-config>=0.0.12,<3.0.0",
+    "ovos-utils>=0.8.2,<1.0.0",
+    "hivemind-bus-client>=0.7.0a2,<1.0.0",
+    "hivemind-plugin-manager>=0.3.0,<1.0.0",
+    "pyee>=8.1.0,<13.0.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-cov",
+]
+
+[project.urls]
+Homepage = "https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin"
+Issues = "https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/issues"
+
+[project.entry-points."hivemind.agent.protocol"]
+"hivemind-ovos-agent-plugin" = "hivemind_ovos_agent_plugin:OVOSAgentProtocol"
+
+[tool.setuptools.dynamic]
+version = { attr = "hivemind_ovos_agent_plugin.version.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hivemind_ovos_agent_plugin*"]
