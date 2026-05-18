@@ -254,6 +254,33 @@ class TestOVOSAgentPolicy(unittest.TestCase):
         v = OVOSAgentPolicy().review_binary(b"x", _client())
         self.assertFalse(v.denied)
 
+    def test_reads_blacklists_via_property_shims(self):
+        """Backwards compat: a Client whose blacklists live only in
+        ``metadata`` (the post-migration canonical storage) must still
+        produce the same mutations — OVOSAgentPolicy reads via the
+        ``user.skill_blacklist`` etc. property shims, which transparently
+        return ``metadata`` values.
+        """
+        # Real Client from HPM exercises the property shims end-to-end.
+        from hivemind_plugin_manager.database import Client
+        user = Client(
+            client_id=42, api_key="k",
+            metadata={
+                "skill_blacklist": ["weather.skill"],
+                "intent_blacklist": ["weather:WeatherIntent"],
+                "message_blacklist": ["speak"],
+            },
+        )
+        p = OVOSAgentPolicy(hm_protocol=_stub_hm_protocol(user=user))
+        client = _client()
+
+        v = p.review(_FakeMessage(), client)
+
+        self.assertFalse(v.denied)
+        kinds = [type(m).__name__ for m in v.mutations]
+        self.assertEqual(kinds, ["AddBlacklistedSkill", "AddBlacklistedIntent"])
+        self.assertEqual(client.msg_blacklist, ["speak"])
+
 
 if __name__ == "__main__":
     unittest.main()

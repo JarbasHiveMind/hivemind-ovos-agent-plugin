@@ -145,12 +145,15 @@ class OVOSAgentPolicy(PolicyPlugin):
     ``message.context["session"]`` or cached them on the connection
     object).
 
-    Reads the same DB fields as before — no schema change. Outbound
-    ``message_blacklist`` is cached on the connection object (still
-    enforced at ``send()`` socket-write time in ``hivemind-core``); skill
-    and intent blacklists are emitted as :class:`AddBlacklistedSkill` /
-    :class:`AddBlacklistedIntent` mutations so the chain runner records
-    what changed.
+    Backwards compatible: reads ``user.skill_blacklist`` etc., which on
+    the post-PR-#27 ``Client`` are property shims backed by
+    ``Client.metadata``. Old on-disk JSON DBs with these as top-level
+    fields are auto-migrated into ``metadata`` by ``Client.deserialize``.
+    Outbound ``message_blacklist`` is cached on the connection object
+    (still enforced at ``send()`` socket-write time in ``hivemind-core``);
+    skill and intent blacklists are emitted as
+    :class:`AddBlacklistedSkill` / :class:`AddBlacklistedIntent`
+    mutations so the chain runner records what changed.
     """
 
     def review(self, message, client) -> Verdict:
