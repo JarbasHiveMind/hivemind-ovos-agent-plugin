@@ -151,11 +151,10 @@ class TestRewriteUtterance(unittest.TestCase):
 # OVOSAgentPolicy
 # ---------------------------------------------------------------------------
 
-def _user(skill_bl=None, intent_bl=None, msg_bl=None):
+def _user(skill_bl=None, intent_bl=None):
     return SimpleNamespace(
         skill_blacklist=skill_bl,
         intent_blacklist=intent_bl,
-        message_blacklist=msg_bl,
     )
 
 
@@ -170,10 +169,7 @@ def _stub_hm_protocol(user=None, sync_raises=False, get_raises=False):
 
 
 def _client(key="k"):
-    c = SimpleNamespace(
-        key=key, skill_blacklist=[], intent_blacklist=[], msg_blacklist=[],
-    )
-    return c
+    return SimpleNamespace(key=key)
 
 
 class TestOVOSAgentPolicy(unittest.TestCase):
@@ -189,7 +185,7 @@ class TestOVOSAgentPolicy(unittest.TestCase):
         self.assertEqual(v.mutations, [])
 
     def test_emits_skill_and_intent_mutations(self):
-        user = _user(skill_bl=["s1", "s2"], intent_bl=["i1"], msg_bl=["m1"])
+        user = _user(skill_bl=["s1", "s2"], intent_bl=["i1"])
         p = OVOSAgentPolicy(hm_protocol=_stub_hm_protocol(user=user))
         client = _client()
 
@@ -201,35 +197,22 @@ class TestOVOSAgentPolicy(unittest.TestCase):
                                  "AddBlacklistedSkill",
                                  "AddBlacklistedIntent"])
 
-    def test_caches_outbound_msg_blacklist_on_connection(self):
-        """Side-effect contract: client.msg_blacklist is updated so the
-        existing send()-side filter in hivemind-core keeps working."""
-        user = _user(msg_bl=["speak", "audio.play"])
-        p = OVOSAgentPolicy(hm_protocol=_stub_hm_protocol(user=user))
-        client = _client()
-
-        p.review(_FakeMessage(), client)
-
-        self.assertEqual(client.msg_blacklist, ["speak", "audio.play"])
-
     def test_does_not_write_dead_caches_to_connection(self):
         """Skill/intent blacklists must NOT be written to connection
-        attributes — they flow through mutations onto the session,
-        period. Writing them to `client.skill_blacklist` /
-        `client.intent_blacklist` would be a leaky side channel that
-        bypasses the mutation system. Only `msg_blacklist` is preserved
-        as a connection-level outbound-filter cache.
+        attributes — they flow through mutations onto the session.
+        hivemind-core no longer carries any connection-level ACL caches
+        besides allowed_types, so the policy must work against a stripped
+        connection.
         """
         user = _user(skill_bl=["s"], intent_bl=["i"])
         p = OVOSAgentPolicy(hm_protocol=_stub_hm_protocol(user=user))
 
-        # Simulate a stripped-down connection — no skill/intent fields.
+        # Simulate a stripped-down connection — only allowed_types/key.
         from types import SimpleNamespace
-        client = SimpleNamespace(key="k", msg_blacklist=[])
+        client = SimpleNamespace(key="k", allowed_types=[])
 
         v = p.review(_FakeMessage(), client)
 
-        # No AttributeError raised: policy doesn't assume the fields exist.
         self.assertFalse(v.denied)
         kinds = [type(m).__name__ for m in v.mutations]
         self.assertEqual(kinds, ["AddBlacklistedSkill", "AddBlacklistedIntent"])
@@ -253,12 +236,11 @@ class TestOVOSAgentPolicy(unittest.TestCase):
         self.assertEqual(v.mutations, [])
 
     def test_none_blacklists_are_handled(self):
-        user = _user(skill_bl=None, intent_bl=None, msg_bl=None)
+        user = _user(skill_bl=None, intent_bl=None)
         p = OVOSAgentPolicy(hm_protocol=_stub_hm_protocol(user=user))
         client = _client()
         v = p.review(_FakeMessage(), client)
         self.assertEqual(v.mutations, [])
-        self.assertEqual(client.msg_blacklist, [])
 
     def test_review_binary_default_allows(self):
         v = OVOSAgentPolicy().review_binary(b"x", _client())
@@ -278,7 +260,6 @@ class TestOVOSAgentPolicy(unittest.TestCase):
             metadata={
                 "skill_blacklist": ["weather.skill"],
                 "intent_blacklist": ["weather:WeatherIntent"],
-                "message_blacklist": ["speak"],
             },
         )
         p = OVOSAgentPolicy(hm_protocol=_stub_hm_protocol(user=user))
@@ -289,7 +270,6 @@ class TestOVOSAgentPolicy(unittest.TestCase):
         self.assertFalse(v.denied)
         kinds = [type(m).__name__ for m in v.mutations]
         self.assertEqual(kinds, ["AddBlacklistedSkill", "AddBlacklistedIntent"])
-        self.assertEqual(client.msg_blacklist, ["speak"])
 
 
 if __name__ == "__main__":

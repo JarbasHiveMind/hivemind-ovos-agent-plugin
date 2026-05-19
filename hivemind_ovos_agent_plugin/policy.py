@@ -145,15 +145,14 @@ class OVOSAgentPolicy(PolicyPlugin):
     ``message.context["session"]`` or cached them on the connection
     object).
 
-    Backwards compatible: reads ``user.skill_blacklist`` etc., which on
-    the post-PR-#27 ``Client`` are property shims backed by
-    ``Client.metadata``. Old on-disk JSON DBs with these as top-level
-    fields are auto-migrated into ``metadata`` by ``Client.deserialize``.
-    Outbound ``message_blacklist`` is cached on the connection object
-    (still enforced at ``send()`` socket-write time in ``hivemind-core``);
-    skill and intent blacklists are emitted as
+    Reads ``user.skill_blacklist`` / ``user.intent_blacklist`` (property
+    shims backed by ``Client.metadata`` after the HPM migration). Emits
     :class:`AddBlacklistedSkill` / :class:`AddBlacklistedIntent`
     mutations so the chain runner records what changed.
+
+    ``message_blacklist`` is not consulted — ``hivemind-core`` no longer
+    supports an outbound message blacklist (whitelist-only via
+    ``allowed_types``).
     """
 
     def review(self, message, client) -> Verdict:
@@ -178,15 +177,6 @@ class OVOSAgentPolicy(PolicyPlugin):
 
         skills = list(user.skill_blacklist or [])
         intents = list(user.intent_blacklist or [])
-        msg_types = list(user.message_blacklist or [])
-
-        # Refresh the deprecated outbound filter on the connection so
-        # mid-session DB updates take effect. ``handle_new_client`` does
-        # the initial population at connect time; this keeps it current.
-        # HiveMindClientConnection.send() filters against
-        # ``client.msg_blacklist`` at socket-write time.
-        if hasattr(client, "msg_blacklist"):
-            client.msg_blacklist = msg_types
 
         muts = [AddBlacklistedSkill(s) for s in skills]
         muts += [AddBlacklistedIntent(i) for i in intents]
