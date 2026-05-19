@@ -246,6 +246,38 @@ class TestOVOSAgentPolicy(unittest.TestCase):
         v = OVOSAgentPolicy().review_binary(b"x", _client())
         self.assertFalse(v.denied)
 
+    def test_bypass_admin_class_attribute(self):
+        """OVOSAgentPolicy opts in to admin bypass — operators should
+        not have skill/intent blacklists or default-session checks
+        imposed on them."""
+        self.assertTrue(OVOSAgentPolicy.BYPASS_ADMIN)
+
+    def test_denies_default_session_payload(self):
+        """Non-admin clients injecting session_id='default' get
+        denied. This replaces the old disconnect path in hivemind-core's
+        handle_bus_message."""
+        msg = _FakeMessage(
+            "recognizer_loop:utterance",
+            data={"utterances": ["hi"]},
+            context={"session": {"session_id": "default",
+                                  "site_id": "client-site"}},
+        )
+        p = OVOSAgentPolicy(hm_protocol=_stub_hm_protocol(user=None))
+        v = p.review(msg, _client())
+        self.assertTrue(v.denied)
+        self.assertEqual(v.code, "session_id_default_forbidden")
+
+    def test_allows_non_default_session_payload(self):
+        msg = _FakeMessage(
+            "recognizer_loop:utterance",
+            data={"utterances": ["hi"]},
+            context={"session": {"session_id": "abc-123",
+                                  "site_id": "client-site"}},
+        )
+        p = OVOSAgentPolicy(hm_protocol=_stub_hm_protocol(user=None))
+        v = p.review(msg, _client())
+        self.assertFalse(v.denied)
+
     def test_reads_blacklists_via_property_shims(self):
         """Backwards compat: a Client whose blacklists live only in
         ``metadata`` (the post-migration canonical storage) must still

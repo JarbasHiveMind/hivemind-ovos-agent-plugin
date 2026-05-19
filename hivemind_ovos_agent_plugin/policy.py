@@ -135,28 +135,41 @@ class RewriteUtterance(Mutation):
 # ---------------------------------------------------------------------------
 
 class OVOSAgentPolicy(PolicyPlugin):
-    """Built-in policy that injects per-client OVOS skill / intent
-    blacklists into the session and refreshes the outbound message-type
-    filter on the connection.
+    """Built-in policy enforcing OVOS-specific admission rules:
 
-    Replaces the side-effecting block at the bottom of the legacy
-    ``hivemind-core`` ``_update_blacklist`` method (which read
-    ``Client.skill_blacklist`` / ``intent_blacklist`` /
-    ``message_blacklist`` from the DB and either injected them into
-    ``message.context["session"]`` or cached them on the connection
-    object).
+    1. **Session sanity** — non-admin clients cannot inject a payload
+       whose ``session_id == "default"``. Returns
+       ``Verdict.deny("session_id_default_forbidden", ...)``. Previously
+       lived in ``hivemind-core``'s ``handle_bus_message``, where it
+       disconnected the client; moving here turns it into a clean deny
+       (admins bypass via :attr:`BYPASS_ADMIN`).
 
-    Reads ``user.skill_blacklist`` / ``user.intent_blacklist`` (property
-    shims backed by ``Client.metadata`` after the HPM migration). Emits
-    :class:`AddBlacklistedSkill` / :class:`AddBlacklistedIntent`
-    mutations so the chain runner records what changed.
+    2. **Skill / intent blacklist injection** — reads
+       ``user.skill_blacklist`` / ``user.intent_blacklist`` (property
+       shims backed by ``Client.metadata`` after the HPM migration) and
+       emits :class:`AddBlacklistedSkill` /
+       :class:`AddBlacklistedIntent` mutations.
 
     ``message_blacklist`` is not consulted — ``hivemind-core`` no longer
     supports an outbound message blacklist (whitelist-only via
     ``allowed_types``).
     """
 
+    BYPASS_ADMIN = True
+
     def review(self, message, client) -> Verdict:
+        # OVOS session sanity: non-admin must not inject a "default"
+        # session_id. The chain runner already skips this policy for
+        # admins (BYPASS_ADMIN), so by the time we get here the client
+        # is non-admin — reject any default-session payload.
+        session = (getattr(message, "context", None) or {}).get("session") or {}
+        if isinstance(session, dict) and session.get("session_id") == "default":
+            return Verdict.deny(
+                "session_id_default_forbidden",
+                "non-admin clients may not inject 'default' session payloads",
+                session_id="default",
+            )
+
         db = getattr(self.hm_protocol, "db", None)
         if db is None:
             return Verdict.allow()
