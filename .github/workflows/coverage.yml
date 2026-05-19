@@ -12,7 +12,11 @@ jobs:
       python_version: '3.11'
       coverage_source: 'hivemind_ovos_agent_plugin'
       test_path: 'tests/'
-      install_extras: 'test'
+      # install_extras intentionally unset — the upstream workflow's
+      # `.[dev]` first-attempt path covers our test deps via the dev
+      # extras alias in pyproject.toml. Setting `install_extras: 'test'`
+      # triggers a buggy `pip install test` literal in gh-automations
+      # that tries to install a PyPI package named "test".
       min_coverage: 0
       # TEMPORARY: drop once hivemind-plugin-manager#27 is released.
       pre_install_pip: '"hivemind-plugin-manager @ git+https://github.com/JarbasHiveMind/hivemind-plugin-manager@feat/policy-plugins"'

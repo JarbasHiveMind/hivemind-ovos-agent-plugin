@@ -10,7 +10,10 @@ jobs:
     uses: OpenVoiceOS/gh-automations/.github/workflows/build-tests.yml@dev
     with:
       python_versions: '["3.10", "3.11", "3.12", "3.13", "3.14"]'
-      install_extras: 'test'
+      # install_extras intentionally unset — the upstream workflow's
+      # `.[dev]` first-attempt path covers our test deps via the dev
+      # extras alias. Setting it triggers a buggy `pip install test`
+      # literal in gh-automations.
       test_path: 'tests'
       # TEMPORARY: hivemind-plugin-manager#27 ships the Mutation/Verdict/
       # PolicyPlugin primitives this package re-exports. Drop the branch
