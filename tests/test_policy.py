@@ -12,7 +12,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from hivemind_ovos_agent_plugin.policy import (AddBlacklistedIntent,
-                                                AddBlacklistedMessageType,
                                                 AddBlacklistedSkill,
                                                 OVOSAgentPolicy,
                                                 RewriteUtterance,
@@ -74,15 +73,6 @@ class TestAddBlacklistedIntent(unittest.TestCase):
         self.assertEqual(
             msg.context["session"]["blacklisted_intents"],
             ["intent.a", "intent.b"],
-        )
-
-
-class TestAddBlacklistedMessageType(unittest.TestCase):
-    def test_appends(self):
-        msg = _FakeMessage()
-        AddBlacklistedMessageType("speak").apply(msg, client=None)
-        self.assertEqual(
-            msg.context["session"]["blacklisted_message_types"], ["speak"],
         )
 
 

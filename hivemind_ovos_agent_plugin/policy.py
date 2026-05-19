@@ -70,17 +70,6 @@ class AddBlacklistedIntent(Mutation):
 
 
 @dataclass
-class AddBlacklistedMessageType(Mutation):
-    """Add a Mycroft message-type to a session-level message blacklist."""
-    msg_type: str
-
-    def apply(self, message, client) -> None:
-        bl = _ensure_session(message).setdefault("blacklisted_message_types", [])
-        if self.msg_type not in bl:
-            bl.append(self.msg_type)
-
-
-@dataclass
 class SetSessionField(Mutation):
     """Set a single key in ``message.context["session"]``."""
     key: str
@@ -200,7 +189,6 @@ class OVOSAgentPolicy(PolicyPlugin):
 __all__ = [
     "AddBlacklistedSkill",
     "AddBlacklistedIntent",
-    "AddBlacklistedMessageType",
     "SetSessionField",
     "SetContextField",
     "RewriteUtterance",

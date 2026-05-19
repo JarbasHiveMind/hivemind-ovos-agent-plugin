@@ -84,7 +84,6 @@ Six concrete `Mutation` subclasses are available for custom policy plugins:
 |---|---|
 | `AddBlacklistedSkill` | Append to `session["blacklisted_skills"]` |
 | `AddBlacklistedIntent` | Append to `session["blacklisted_intents"]` |
-| `AddBlacklistedMessageType` | Append to `session["blacklisted_message_types"]` |
 | `SetSessionField` | Set any key in `message.context["session"]` |
 | `SetContextField` | Set a nested path in `message.context` |
 | `RewriteUtterance` | Replace utterance text in `recognizer_loop:utterance` messages |

@@ -36,12 +36,11 @@ Each exposes an `apply(message, client) -> None` method called by the chain runn
 |---|---|---|
 | `AddBlacklistedSkill` | `skill_id: str` | Appends to `session["blacklisted_skills"]`; no-op if already present. |
 | `AddBlacklistedIntent` | `intent_name: str` | Appends to `session["blacklisted_intents"]`; no-op if already present. |
-| `AddBlacklistedMessageType` | `msg_type: str` | Appends to `session["blacklisted_message_types"]`; no-op if already present. |
 | `SetSessionField` | `key: str`, `value: Any` | Sets `session[key] = value`. |
 | `SetContextField` | `path: Tuple[str, ...]`, `value: Any` | Traverses `message.context` along `path`, creating missing intermediate dicts, then sets the leaf. |
 | `RewriteUtterance` | `text: str` | Replaces `message.data["utterances"]` with `[text]`; silent no-op on any `msg_type` other than `recognizer_loop:utterance`. |
 
-All six mutations guard against a non-dict `message.context` or
+All five mutations guard against a non-dict `message.context` or
 `message.context["session"]` by coercing to an empty dict rather than raising.
 `_ensure_session` — `hivemind_ovos_agent_plugin/policy.py:29` — is the shared
 helper that provides this guarantee.
@@ -66,19 +65,16 @@ the policy returns `Verdict.allow()` with no mutations — it never denies.
 `message_blacklist` is **not** consulted. `hivemind-core` dropped outbound
 message blacklisting in favour of a whitelist-only model (`allowed_types`);
 there is no consumer for a message-type blacklist in the admission chain.
-`AddBlacklistedMessageType` is provided for custom downstream policy plugins
-that need it, not used by `OVOSAgentPolicy` itself.
 
 ## All-at-once import
 
-All six mutation classes and `OVOSAgentPolicy` are re-exported from the package
+All five mutation classes and `OVOSAgentPolicy` are re-exported from the package
 top-level (`hivemind_ovos_agent_plugin/__init__.py:14-20`):
 
 ```python
 from hivemind_ovos_agent_plugin import (
     AddBlacklistedSkill,
     AddBlacklistedIntent,
-    AddBlacklistedMessageType,
     SetSessionField,
     SetContextField,
     RewriteUtterance,
