@@ -128,36 +128,30 @@ class OVOSAgentPolicy(PolicyPlugin):
 
     1. **Session sanity** — non-admin clients cannot inject a payload
        whose ``session_id == "default"``. Returns
-       ``Verdict.deny("session_id_default_forbidden", ...)``. Previously
-       lived in ``hivemind-core``'s ``handle_bus_message``, where it
-       disconnected the client; moving here turns it into a clean deny
-       (admins bypass via :attr:`BYPASS_ADMIN`).
+       ``Verdict.deny("session_id_default_forbidden", ...)``. Admin
+       clients (``client.is_admin``) bypass this check.
 
     2. **Skill / intent blacklist injection** — reads
        ``user.skill_blacklist`` / ``user.intent_blacklist`` (property
-       shims backed by ``Client.metadata`` after the HPM migration) and
-       emits :class:`AddBlacklistedSkill` /
-       :class:`AddBlacklistedIntent` mutations.
+       shims backed by ``Client.metadata``) and emits
+       :class:`AddBlacklistedSkill` / :class:`AddBlacklistedIntent`
+       mutations.
 
-    ``message_blacklist`` is not consulted — ``hivemind-core`` no longer
-    supports an outbound message blacklist (whitelist-only via
-    ``allowed_types``).
+    ``message_blacklist`` is not consulted — ``hivemind-core`` enforces
+    a whitelist-only admission model via ``allowed_types``.
     """
 
-    BYPASS_ADMIN = True
-
     def review(self, message, client) -> Verdict:
-        # OVOS session sanity: non-admin must not inject a "default"
-        # session_id. The chain runner already skips this policy for
-        # admins (BYPASS_ADMIN), so by the time we get here the client
-        # is non-admin — reject any default-session payload.
-        session = (getattr(message, "context", None) or {}).get("session") or {}
-        if isinstance(session, dict) and session.get("session_id") == "default":
-            return Verdict.deny(
-                "session_id_default_forbidden",
-                "non-admin clients may not inject 'default' session payloads",
-                session_id="default",
-            )
+        # OVOS session sanity: non-admins cannot inject a "default"
+        # session_id. Admins are exempt — checked inline.
+        if not getattr(client, "is_admin", False):
+            session = (getattr(message, "context", None) or {}).get("session") or {}
+            if isinstance(session, dict) and session.get("session_id") == "default":
+                return Verdict.deny(
+                    "session_id_default_forbidden",
+                    "non-admin clients may not inject 'default' session payloads",
+                    session_id="default",
+                )
 
         db = getattr(self.hm_protocol, "db", None)
         if db is None:

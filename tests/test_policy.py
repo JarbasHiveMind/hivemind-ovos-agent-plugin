@@ -158,8 +158,8 @@ def _stub_hm_protocol(user=None, sync_raises=False, get_raises=False):
     return SimpleNamespace(db=db)
 
 
-def _client(key="k"):
-    return SimpleNamespace(key=key)
+def _client(key="k", is_admin=False):
+    return SimpleNamespace(key=key, is_admin=is_admin)
 
 
 class TestOVOSAgentPolicy(unittest.TestCase):
@@ -236,16 +236,9 @@ class TestOVOSAgentPolicy(unittest.TestCase):
         v = OVOSAgentPolicy().review_binary(b"x", _client())
         self.assertFalse(v.denied)
 
-    def test_bypass_admin_class_attribute(self):
-        """OVOSAgentPolicy opts in to admin bypass — operators should
-        not have skill/intent blacklists or default-session checks
-        imposed on them."""
-        self.assertTrue(OVOSAgentPolicy.BYPASS_ADMIN)
-
-    def test_denies_default_session_payload(self):
+    def test_denies_default_session_payload_for_non_admin(self):
         """Non-admin clients injecting session_id='default' get
-        denied. This replaces the old disconnect path in hivemind-core's
-        handle_bus_message."""
+        denied with code ``session_id_default_forbidden``."""
         msg = _FakeMessage(
             "recognizer_loop:utterance",
             data={"utterances": ["hi"]},
@@ -253,9 +246,22 @@ class TestOVOSAgentPolicy(unittest.TestCase):
                                   "site_id": "client-site"}},
         )
         p = OVOSAgentPolicy(hm_protocol=_stub_hm_protocol(user=None))
-        v = p.review(msg, _client())
+        v = p.review(msg, _client(is_admin=False))
         self.assertTrue(v.denied)
         self.assertEqual(v.code, "session_id_default_forbidden")
+
+    def test_allows_default_session_payload_for_admin(self):
+        """Admin clients may inject session_id='default' — the policy
+        branches on ``client.is_admin`` inline and skips the refusal."""
+        msg = _FakeMessage(
+            "recognizer_loop:utterance",
+            data={"utterances": ["hi"]},
+            context={"session": {"session_id": "default",
+                                  "site_id": "client-site"}},
+        )
+        p = OVOSAgentPolicy(hm_protocol=_stub_hm_protocol(user=None))
+        v = p.review(msg, _client(is_admin=True))
+        self.assertFalse(v.denied)
 
     def test_allows_non_default_session_payload(self):
         msg = _FakeMessage(
