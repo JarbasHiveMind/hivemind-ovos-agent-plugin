@@ -212,15 +212,27 @@ class TestOVOSAgentPolicy(unittest.TestCase):
 
         self.assertEqual(client.msg_blacklist, ["speak", "audio.play"])
 
-    def test_caches_skill_and_intent_lists_on_connection(self):
+    def test_does_not_write_dead_caches_to_connection(self):
+        """Skill/intent blacklists must NOT be written to connection
+        attributes — they flow through mutations onto the session,
+        period. Writing them to `client.skill_blacklist` /
+        `client.intent_blacklist` would be a leaky side channel that
+        bypasses the mutation system. Only `msg_blacklist` is preserved
+        as a connection-level outbound-filter cache.
+        """
         user = _user(skill_bl=["s"], intent_bl=["i"])
         p = OVOSAgentPolicy(hm_protocol=_stub_hm_protocol(user=user))
-        client = _client()
 
-        p.review(_FakeMessage(), client)
+        # Simulate a stripped-down connection — no skill/intent fields.
+        from types import SimpleNamespace
+        client = SimpleNamespace(key="k", msg_blacklist=[])
 
-        self.assertEqual(client.skill_blacklist, ["s"])
-        self.assertEqual(client.intent_blacklist, ["i"])
+        v = p.review(_FakeMessage(), client)
+
+        # No AttributeError raised: policy doesn't assume the fields exist.
+        self.assertFalse(v.denied)
+        kinds = [type(m).__name__ for m in v.mutations]
+        self.assertEqual(kinds, ["AddBlacklistedSkill", "AddBlacklistedIntent"])
 
     def test_sync_failure_is_tolerated(self):
         user = _user(skill_bl=["s"])
@@ -246,8 +258,6 @@ class TestOVOSAgentPolicy(unittest.TestCase):
         client = _client()
         v = p.review(_FakeMessage(), client)
         self.assertEqual(v.mutations, [])
-        self.assertEqual(client.skill_blacklist, [])
-        self.assertEqual(client.intent_blacklist, [])
         self.assertEqual(client.msg_blacklist, [])
 
     def test_review_binary_default_allows(self):

@@ -180,12 +180,13 @@ class OVOSAgentPolicy(PolicyPlugin):
         intents = list(user.intent_blacklist or [])
         msg_types = list(user.message_blacklist or [])
 
-        # cache outbound filter on the connection — same as the old
-        # _update_blacklist side effect; HiveMindClientConnection.send()
-        # filters against client.msg_blacklist at socket-write time.
-        client.skill_blacklist = skills
-        client.intent_blacklist = intents
-        client.msg_blacklist = msg_types
+        # Refresh the deprecated outbound filter on the connection so
+        # mid-session DB updates take effect. ``handle_new_client`` does
+        # the initial population at connect time; this keeps it current.
+        # HiveMindClientConnection.send() filters against
+        # ``client.msg_blacklist`` at socket-write time.
+        if hasattr(client, "msg_blacklist"):
+            client.msg_blacklist = msg_types
 
         muts = [AddBlacklistedSkill(s) for s in skills]
         muts += [AddBlacklistedIntent(i) for i in intents]
