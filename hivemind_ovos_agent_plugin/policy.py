@@ -1,9 +1,10 @@
 """OVOS-specific policy primitives.
 
 Concrete :class:`Mutation` subclasses for the OVOS bus and the built-in
-:class:`OVOSAgentPolicy` that migrates the legacy skill/intent/message
-blacklist injection out of ``hivemind-core`` (``_update_blacklist`` side
-effects) into a proper policy plugin.
+:class:`OVOSAgentPolicy` that migrates the legacy skill/intent blacklist
+injection out of ``hivemind-core`` (the session-rewrite side effects
+that used to live in ``_update_blacklist``, now
+``_install_client_session``) into a proper policy plugin.
 
 These types are OVOS-specific because they manipulate the shape of
 ``message.context["session"]`` (an OVOS ``Session`` serialisation) and

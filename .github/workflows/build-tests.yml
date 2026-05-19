@@ -12,3 +12,7 @@ jobs:
       python_versions: '["3.10", "3.11", "3.12", "3.13", "3.14"]'
       install_extras: 'test'
       test_path: 'tests'
+      # TEMPORARY: hivemind-plugin-manager#27 ships the Mutation/Verdict/
+      # PolicyPlugin primitives this package re-exports. Drop the branch
+      # pin once #27 is released to PyPI.
+      pre_install_pip: '"hivemind-plugin-manager @ git+https://github.com/JarbasHiveMind/hivemind-plugin-manager@feat/policy-plugins"'
