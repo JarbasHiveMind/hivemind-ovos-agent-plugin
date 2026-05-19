@@ -17,12 +17,22 @@ dependencies = [
     "ovos-config>=0.0.12,<3.0.0",
     "ovos-utils>=0.8.2,<1.0.0",
     "hivemind-bus-client>=0.7.0a2,<1.0.0",
-    "hivemind-plugin-manager>=0.6.0a1,<1.0.0",
+    # NOTE: floor stays at 0.5.0 while #27 is in CI as a branch install
+    # (gh-automations only bumps version.py on merge to dev). Tighten
+    # to >=0.6.0a1 once #27 is released.
+    "hivemind-plugin-manager>=0.5.0,<1.0.0",
     "pyee>=8.1.0,<13.0.0",
 ]
 
 [project.optional-dependencies]
 test = [
+    "pytest",
+    "pytest-cov",
+]
+# Alias so gh-automations' `pip install -e ".[dev]"` first-attempt path
+# resolves; without `dev` it falls through to a buggy `pip install test`
+# literal branch in the upstream workflow.
+dev = [
     "pytest",
     "pytest-cov",
 ]
