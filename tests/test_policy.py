@@ -153,13 +153,29 @@ def _stub_hm_protocol(user=None, sync_raises=False, get_raises=False):
     db.sync = MagicMock(side_effect=Exception("sync") if sync_raises else None)
     if get_raises:
         db.get_client_by_api_key = MagicMock(side_effect=Exception("get"))
+        db.refresh = MagicMock(side_effect=Exception("get"))
     else:
         db.get_client_by_api_key = MagicMock(return_value=user)
+        db.refresh = MagicMock(return_value=user)
     return SimpleNamespace(db=db)
 
 
+class _FakeConn:
+    """Connection stand-in mirroring HiveMindClientConnection.resolve_user."""
+
+    def __init__(self, key="k", is_admin=False):
+        self.key = key
+        self.is_admin = is_admin
+        self._resolved = None
+
+    def resolve_user(self, db, ttl: float = 5.0, force: bool = False):
+        if self._resolved is None or force:
+            self._resolved = db.get_client_by_api_key(self.key)
+        return self._resolved
+
+
 def _client(key="k", is_admin=False):
-    return SimpleNamespace(key=key, is_admin=is_admin)
+    return _FakeConn(key=key, is_admin=is_admin)
 
 
 class TestOVOSAgentPolicy(unittest.TestCase):
@@ -197,9 +213,10 @@ class TestOVOSAgentPolicy(unittest.TestCase):
         user = _user(skill_bl=["s"], intent_bl=["i"])
         p = OVOSAgentPolicy(hm_protocol=_stub_hm_protocol(user=user))
 
-        # Simulate a stripped-down connection — only allowed_types/key.
-        from types import SimpleNamespace
-        client = SimpleNamespace(key="k", allowed_types=[])
+        # Simulate a stripped-down connection — only allowed_types/key,
+        # plus the resolve_user method the chain runner relies on.
+        client = _FakeConn(key="k")
+        client.allowed_types = []
 
         v = p.review(_FakeMessage(), client)
 
@@ -207,23 +224,16 @@ class TestOVOSAgentPolicy(unittest.TestCase):
         kinds = [type(m).__name__ for m in v.mutations]
         self.assertEqual(kinds, ["AddBlacklistedSkill", "AddBlacklistedIntent"])
 
-    def test_sync_failure_is_tolerated(self):
-        user = _user(skill_bl=["s"])
-        p = OVOSAgentPolicy(
-            hm_protocol=_stub_hm_protocol(user=user, sync_raises=True),
-        )
-        v = p.review(_FakeMessage(), _client())
-        self.assertFalse(v.denied)
-        # still emits mutation from the user we returned
-        self.assertEqual(len(v.mutations), 1)
-
-    def test_get_client_failure_allows_without_mutations(self):
+    def test_db_failure_denies_not_allows(self):
+        """OVOSAgentPolicy fails closed: if client.resolve_user raises, the
+        chain cannot honour skill/intent blacklists, so the policy must
+        deny with policy_error rather than silently allow."""
         p = OVOSAgentPolicy(
             hm_protocol=_stub_hm_protocol(get_raises=True),
         )
         v = p.review(_FakeMessage(), _client())
-        self.assertFalse(v.denied)
-        self.assertEqual(v.mutations, [])
+        self.assertTrue(v.denied)
+        self.assertEqual(v.code, "policy_error")
 
     def test_none_blacklists_are_handled(self):
         user = _user(skill_bl=None, intent_bl=None)

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
 from hivemind_plugin_manager import (DenyCodes, Mutation, PolicyPlugin,
-                                     RESOLVED_CLIENT_CTX_KEY, Verdict)
+                                     Verdict)
 from ovos_utils.log import LOG
 
 
@@ -146,11 +146,12 @@ class OVOSAgentPolicy(PolicyPlugin):
     ``message_blacklist`` is not consulted — ``hivemind-core`` enforces
     a whitelist-only admission model via ``allowed_types``.
 
-    Convention: reads the resolved client row from
-    ``message.context[RESOLVED_CLIENT_CTX_KEY]`` if ``MessageTypeACLPolicy``
-    populated it earlier in the chain, falling back to a fresh DB lookup
-    only if absent. Single source of truth for the context key lives in
-    ``hivemind_plugin_manager.policy``.
+    Resolves the client row via ``client.resolve_user(db)`` —
+    connection-scoped cache populated upstream by ``MessageTypeACLPolicy``
+    so this is a no-op DB hit in the common chain pass. A DB failure
+    fails closed with ``policy_error``: the OVOS bridge cannot honour
+    skill/intent blacklists without the user row, so silently allowing
+    would defeat the policy. Operators must keep the DB reachable.
     """
 
     def review(self, message, client) -> Verdict:
@@ -165,29 +166,20 @@ class OVOSAgentPolicy(PolicyPlugin):
                     session_id="default",
                 )
 
-        # First, see whether MessageTypeACLPolicy already resolved this
-        # client earlier in the chain. Avoids a per-message DB hit.
-        user = None
-        ctx = getattr(message, "context", None)
-        if isinstance(ctx, dict):
-            user = ctx.get(RESOLVED_CLIENT_CTX_KEY)
+        db = getattr(self.hm_protocol, "db", None)
+        if db is None:
+            return Verdict.allow()
 
-        if user is None:
-            db = getattr(self.hm_protocol, "db", None)
-            if db is None:
-                return Verdict.allow()
-
-            try:
-                db.sync()
-            except Exception:
-                LOG.warning("db.sync() failed in OVOSAgentPolicy", exc_info=True)
-
-            try:
-                user = db.get_client_by_api_key(client.key)
-            except Exception:
-                LOG.warning("db.get_client_by_api_key failed in OVOSAgentPolicy",
-                            exc_info=True)
-                return Verdict.allow()
+        try:
+            user = client.resolve_user(db)
+        except Exception as e:
+            LOG.warning("OVOSAgentPolicy: client.resolve_user failed",
+                        exc_info=True)
+            return Verdict.deny(
+                DenyCodes.POLICY_ERROR,
+                "user lookup failed",
+                error=str(e),
+            )
 
         if user is None:
             return Verdict.allow()
