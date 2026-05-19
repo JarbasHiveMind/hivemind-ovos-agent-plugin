@@ -17,9 +17,10 @@ Spec: https://github.com/JarbasHiveMind/HiveMind-core/issues/85
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
-from hivemind_plugin_manager import Mutation, PolicyPlugin, Verdict
+from hivemind_plugin_manager import (DenyCodes, Mutation, PolicyPlugin,
+                                     RESOLVED_CLIENT_CTX_KEY, Verdict)
 from ovos_utils.log import LOG
 
 
@@ -52,10 +53,11 @@ class AddBlacklistedSkill(Mutation):
     """Add a ``skill_id`` to ``message.context["session"]["blacklisted_skills"]``."""
     skill_id: str
 
-    def apply(self, message, client) -> None:
+    def apply(self, message, client) -> Optional[Any]:
         bl = _ensure_session(message).setdefault("blacklisted_skills", [])
         if self.skill_id not in bl:
             bl.append(self.skill_id)
+        return None
 
 
 @dataclass
@@ -63,10 +65,11 @@ class AddBlacklistedIntent(Mutation):
     """Add an intent name to ``message.context["session"]["blacklisted_intents"]``."""
     intent_name: str
 
-    def apply(self, message, client) -> None:
+    def apply(self, message, client) -> Optional[Any]:
         bl = _ensure_session(message).setdefault("blacklisted_intents", [])
         if self.intent_name not in bl:
             bl.append(self.intent_name)
+        return None
 
 
 @dataclass
@@ -75,8 +78,9 @@ class SetSessionField(Mutation):
     key: str
     value: Any
 
-    def apply(self, message, client) -> None:
+    def apply(self, message, client) -> Optional[Any]:
         _ensure_session(message)[self.key] = self.value
+        return None
 
 
 @dataclass
@@ -89,9 +93,9 @@ class SetContextField(Mutation):
     path: Tuple[str, ...]
     value: Any
 
-    def apply(self, message, client) -> None:
+    def apply(self, message, client) -> Optional[Any]:
         if not self.path:
-            return
+            return None
         target = message.context
         if not isinstance(target, dict):
             target = {}
@@ -103,6 +107,7 @@ class SetContextField(Mutation):
                 target[key] = nxt
             target = nxt
         target[self.path[-1]] = self.value
+        return None
 
 
 @dataclass
@@ -111,12 +116,13 @@ class RewriteUtterance(Mutation):
     Mycroft message. Silent no-op on any other ``msg_type``."""
     text: str
 
-    def apply(self, message, client) -> None:
+    def apply(self, message, client) -> Optional[Any]:
         if getattr(message, "msg_type", None) != "recognizer_loop:utterance":
-            return
+            return None
         if not isinstance(message.data, dict):
-            return
+            return None
         message.data["utterances"] = [self.text]
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +145,12 @@ class OVOSAgentPolicy(PolicyPlugin):
 
     ``message_blacklist`` is not consulted — ``hivemind-core`` enforces
     a whitelist-only admission model via ``allowed_types``.
+
+    Convention: reads the resolved client row from
+    ``message.context[RESOLVED_CLIENT_CTX_KEY]`` if ``MessageTypeACLPolicy``
+    populated it earlier in the chain, falling back to a fresh DB lookup
+    only if absent. Single source of truth for the context key lives in
+    ``hivemind_plugin_manager.policy``.
     """
 
     def review(self, message, client) -> Verdict:
@@ -148,26 +160,34 @@ class OVOSAgentPolicy(PolicyPlugin):
             session = (getattr(message, "context", None) or {}).get("session") or {}
             if isinstance(session, dict) and session.get("session_id") == "default":
                 return Verdict.deny(
-                    "session_id_default_forbidden",
+                    DenyCodes.SESSION_ID_DEFAULT_FORBIDDEN,
                     "non-admin clients may not inject 'default' session payloads",
                     session_id="default",
                 )
 
-        db = getattr(self.hm_protocol, "db", None)
-        if db is None:
-            return Verdict.allow()
+        # First, see whether MessageTypeACLPolicy already resolved this
+        # client earlier in the chain. Avoids a per-message DB hit.
+        user = None
+        ctx = getattr(message, "context", None)
+        if isinstance(ctx, dict):
+            user = ctx.get(RESOLVED_CLIENT_CTX_KEY)
 
-        try:
-            db.sync()
-        except Exception:
-            LOG.debug("db.sync() failed in OVOSAgentPolicy", exc_info=True)
+        if user is None:
+            db = getattr(self.hm_protocol, "db", None)
+            if db is None:
+                return Verdict.allow()
 
-        try:
-            user = db.get_client_by_api_key(client.key)
-        except Exception:
-            LOG.debug("db.get_client_by_api_key failed in OVOSAgentPolicy",
-                      exc_info=True)
-            return Verdict.allow()
+            try:
+                db.sync()
+            except Exception:
+                LOG.warning("db.sync() failed in OVOSAgentPolicy", exc_info=True)
+
+            try:
+                user = db.get_client_by_api_key(client.key)
+            except Exception:
+                LOG.warning("db.get_client_by_api_key failed in OVOSAgentPolicy",
+                            exc_info=True)
+                return Verdict.allow()
 
         if user is None:
             return Verdict.allow()
