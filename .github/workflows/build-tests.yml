@@ -15,7 +15,6 @@ jobs:
       # extras alias. Setting it triggers a buggy `pip install test`
       # literal in gh-automations.
       test_path: 'tests'
-      # TEMPORARY: hivemind-plugin-manager#27 ships the Mutation/Verdict/
-      # The e2e tests exercise the policy admission chain via hivescope; pin
-      # the in-flight policy branches until they release, then drop this line.
-      pre_install_pip: '"hivescope @ git+https://github.com/JarbasHiveMind/hivescope@fix/acl-resolve-user" "hivemind-plugin-manager @ git+https://github.com/JarbasHiveMind/hivemind-plugin-manager@feat/policy-plugins" "hivemind-core @ git+https://github.com/JarbasHiveMind/HiveMind-core@feat/policy-chain-runner"'
+      # hivescope + plugin-manager pinned to released PyPI prereleases;
+      # hivemind-core stays on its branch until HiveMind-core#89 releases (circular dep).
+      pre_install_pip: '"hivescope==0.2.2a1" "hivemind-plugin-manager==0.6.0a1" "hivemind-core @ git+https://github.com/JarbasHiveMind/HiveMind-core@feat/policy-chain-runner"'
