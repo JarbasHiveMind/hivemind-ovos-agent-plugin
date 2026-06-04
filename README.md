@@ -69,6 +69,28 @@ Upstream traffic (client → OVOS bus) is handled by `hivemind-core` itself; thi
 only handles the downstream half.
 
 
+## Policy plugin
+
+This package also registers as a `hivemind.policy` provider under the name
+`hivemind-ovos-agent-policy`. `hivemind-core` runs the policy chain before
+forwarding any inbound client message; the built-in `OVOSAgentPolicy` reads
+per-client `skill_blacklist` and `intent_blacklist` from the credential store
+and injects them into `message.context["session"]` as
+`AddBlacklistedSkill` / `AddBlacklistedIntent` mutations.
+
+Six concrete `Mutation` subclasses are available for custom policy plugins:
+
+| Class | Purpose |
+|---|---|
+| `AddBlacklistedSkill` | Append to `session["blacklisted_skills"]` |
+| `AddBlacklistedIntent` | Append to `session["blacklisted_intents"]` |
+| `SetSessionField` | Set any key in `message.context["session"]` |
+| `SetContextField` | Set a nested path in `message.context` |
+| `RewriteUtterance` | Replace utterance text in `recognizer_loop:utterance` messages |
+
+All types are importable from `hivemind_ovos_agent_plugin` directly. See
+[`docs/policy.md`](docs/policy.md) for full details.
+
 ## Documentation
 
 Full developer documentation lives in [`docs/`](docs/):
@@ -78,6 +100,7 @@ Full developer documentation lives in [`docs/`](docs/):
 - [`docs/configuration.md`](docs/configuration.md) — every config knob.
 - [`docs/message_flow.md`](docs/message_flow.md) — end-to-end message lifecycle.
 - [`docs/development.md`](docs/development.md) — running tests, releasing.
+- [`docs/policy.md`](docs/policy.md) — policy plugin and mutation classes.
 
 ## License
 

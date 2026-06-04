@@ -12,5 +12,12 @@ jobs:
       python_version: '3.11'
       coverage_source: 'hivemind_ovos_agent_plugin'
       test_path: 'tests/'
-      install_extras: 'test'
+      # install_extras intentionally unset — the upstream workflow's
+      # `.[dev]` first-attempt path covers our test deps via the dev
+      # extras alias in pyproject.toml. Setting `install_extras: 'test'`
+      # triggers a buggy `pip install test` literal in gh-automations
+      # that tries to install a PyPI package named "test".
       min_coverage: 0
+      # hivescope + plugin-manager pinned to released PyPI prereleases;
+      # hivemind-core stays on its branch until HiveMind-core#89 releases (circular dep).
+      pre_install_pip: '"hivescope==0.2.2a1" "hivemind-plugin-manager==0.6.0a1" "hivemind-core @ git+https://github.com/JarbasHiveMind/HiveMind-core@feat/policy-chain-runner"'
