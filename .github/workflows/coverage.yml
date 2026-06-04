@@ -18,5 +18,6 @@ jobs:
       # triggers a buggy `pip install test` literal in gh-automations
       # that tries to install a PyPI package named "test".
       min_coverage: 0
-      # TEMPORARY: drop once hivemind-plugin-manager#27 is released.
-      pre_install_pip: '"hivemind-plugin-manager @ git+https://github.com/JarbasHiveMind/hivemind-plugin-manager@feat/policy-plugins"'
+      # The e2e tests exercise the policy admission chain via hivescope; pin
+      # the in-flight policy branches until they release, then drop this line.
+      pre_install_pip: '"hivescope @ git+https://github.com/JarbasHiveMind/hivescope@fix/acl-resolve-user" "hivemind-plugin-manager @ git+https://github.com/JarbasHiveMind/hivemind-plugin-manager@feat/policy-plugins" "hivemind-core @ git+https://github.com/JarbasHiveMind/HiveMind-core@feat/policy-chain-runner"'
