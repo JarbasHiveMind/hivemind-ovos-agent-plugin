@@ -10,5 +10,11 @@ jobs:
     uses: OpenVoiceOS/gh-automations/.github/workflows/build-tests.yml@dev
     with:
       python_versions: '["3.10", "3.11", "3.12", "3.13", "3.14"]'
-      install_extras: 'test'
+      # install_extras intentionally unset — the upstream workflow's
+      # `.[dev]` first-attempt path covers our test deps via the dev
+      # extras alias. Setting it triggers a buggy `pip install test`
+      # literal in gh-automations.
       test_path: 'tests'
+      # hivescope + plugin-manager pinned to released PyPI prereleases;
+      # hivemind-core stays on its branch until HiveMind-core#89 releases (circular dep).
+      pre_install_pip: '"hivescope==0.2.2a1" "hivemind-plugin-manager==0.6.0a1" "hivemind-core @ git+https://github.com/JarbasHiveMind/HiveMind-core@feat/policy-chain-runner"'
