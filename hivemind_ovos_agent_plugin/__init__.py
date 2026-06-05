@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Dict, Any
+from typing import Dict, Any, Iterator, Optional
 
 from ovos_bus_client import MessageBusClient
 from ovos_bus_client.message import Message
@@ -43,6 +43,13 @@ class OVOSAgentProtocol(AgentProtocol):
         LOG.debug("registering internal OVOS bus handlers")
         self.bus.on("hive.send.downstream", self.handle_send)
         self.bus.on("message", self.handle_internal_mycroft)  # catch all
+
+
+    def natural_language_query(self, utterance: str,
+                               lang: str) -> "Iterator[Optional[str]]":
+        """Answer a natural-language query by injecting it on the OVOS bus and
+        streaming the ``speak`` replies (see AgentProtocol._stream_from_bus)."""
+        return self._stream_from_bus(utterance, lang)
 
     # mycroft handlers - from master -> slave
     def handle_send(self, message: Message):
