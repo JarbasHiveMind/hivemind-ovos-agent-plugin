@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0a4](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.0a4) (2026-06-05)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.0a3...0.3.0a4)
+
+**Merged pull requests:**
+
+- ci: fix integration workflow startup\_failure \(system\_deps input\) [\#13](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/13) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.3.0a3](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.0a3) (2026-06-05)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.0a2...0.3.0a3)
