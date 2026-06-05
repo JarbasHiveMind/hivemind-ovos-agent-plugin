@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0a3](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.0a3) (2026-06-05)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.0a2...0.3.0a3)
+
+**Merged pull requests:**
+
+- test: live-OVOS e2e via ovoscope [\#11](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/11) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.3.0a2](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.0a2) (2026-06-05)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.0a1...0.3.0a2)
