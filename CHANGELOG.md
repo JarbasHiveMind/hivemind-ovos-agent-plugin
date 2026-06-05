@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.0a2](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.2.0a2) (2026-06-05)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.2.0a1...0.2.0a2)
+
+**Merged pull requests:**
+
+- ci: drop hivemind-core branch pin \(→ 4.3.0a2\) [\#5](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/5) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.2.0a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.2.0a1) (2026-06-04)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.1.0...0.2.0a1)
