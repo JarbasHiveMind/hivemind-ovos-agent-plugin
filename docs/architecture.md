@@ -39,8 +39,10 @@ It owns exactly two responsibilities:
 It does **not** own:
 
 - Decryption, handshake, authentication — `hivemind-core` does this.
-- ACL enforcement / policy — handled by `hivemind-core`'s policy chain (see
-  [issue #85](https://github.com/JarbasHiveMind/HiveMind-core/issues/85)).
+- ACL enforcement / policy admission — orchestrated by `hivemind-core`'s policy
+  chain (see [issue #85](https://github.com/JarbasHiveMind/HiveMind-core/issues/85)).
+  This package contributes `OVOSAgentPolicy` (entry point `hivemind.policy /
+  hivemind-ovos-agent-policy`) to that chain; see [`policy.md`](policy.md).
 - Binary payload routing — handled by a separate `BinaryDataHandlerProtocol` plugin.
 - Upstream traffic (client → OVOS bus) — that is `hivemind-core`'s direct
   responsibility, not the agent protocol's.
