@@ -26,11 +26,12 @@ pip install -e .
 The plugin registers itself as a HiveMind agent protocol via the
 `hivemind.agent.protocol` entry point group, with name `hivemind-ovos-agent-plugin`.
 
-In your `hivemind-core` configuration:
+In your `hivemind-core` configuration (`~/.config/hivemind-core/server.json`):
 
 ```json
 {
   "agent_protocol": {
+    "module": "hivemind-ovos-agent-plugin",
     "hivemind-ovos-agent-plugin": {
       "host": "127.0.0.1",
       "port": 8181
@@ -42,6 +43,11 @@ In your `hivemind-core` configuration:
 `hivemind-core` will discover the plugin via its entry point and instantiate the
 `OVOSAgentProtocol` class with the supplied config. The plugin connects to the OVOS
 message bus at the given host/port (defaulting to `127.0.0.1:8181`).
+
+This is also the default — if `hivemind-core` is running on the same host as OVOS,
+no config change is needed. `hivemind-core` ships with `hivemind-ovos-agent-plugin`
+pre-selected and falls back to the `websocket` section of the global OVOS
+`mycroft.conf` for the bus address.
 
 ### Direct programmatic use
 
