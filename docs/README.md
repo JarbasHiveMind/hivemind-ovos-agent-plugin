@@ -15,3 +15,5 @@ For end-user installation and usage, see the [top-level README](../README.md).
   isolation guarantee.
 - [`development.md`](development.md) — local development, testing, and release
   workflow.
+- [`policy.md`](policy.md) — OVOS-specific policy plugin, mutation classes, and
+  the built-in `OVOSAgentPolicy`.

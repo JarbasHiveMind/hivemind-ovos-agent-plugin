@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Dict, Any
+from typing import Dict, Any, Iterator, Optional
 
 from ovos_bus_client import MessageBusClient
 from ovos_bus_client.message import Message
@@ -11,6 +11,12 @@ from pyee import EventEmitter
 from hivemind_bus_client.message import HiveMessage, HiveMessageType
 from hivemind_plugin_manager.protocols import AgentProtocol
 
+from hivemind_ovos_agent_plugin.policy import (AddBlacklistedIntent,
+                                                AddBlacklistedSkill,
+                                                OVOSAgentPolicy,
+                                                RewriteUtterance,
+                                                SetContextField,
+                                                SetSessionField)
 from hivemind_ovos_agent_plugin.version import __version__
 
 
@@ -37,6 +43,57 @@ class OVOSAgentProtocol(AgentProtocol):
         LOG.debug("registering internal OVOS bus handlers")
         self.bus.on("hive.send.downstream", self.handle_send)
         self.bus.on("message", self.handle_internal_mycroft)  # catch all
+
+
+    def natural_language_query(self, utterance: str,
+                               lang: str) -> "Iterator[Optional[str]]":
+        """Answer by injecting the utterance on the OVOS bus and streaming the
+        ``speak`` replies until ``ovos.utterance.handled`` (or 10s inactivity),
+        correlated by a fresh query-scoped session so they are not reverse-routed."""
+        import queue
+        import uuid
+        qid = uuid.uuid4().hex
+        q: "queue.Queue" = queue.Queue()
+
+        def _on_speak(msg):
+            if isinstance(msg, str):
+                try:
+                    msg = Message.deserialize(msg)
+                except Exception:
+                    return
+            if msg.msg_type == "speak" and msg.context.get("query_id") == qid:
+                q.put(msg.data.get("utterance", ""))
+
+        def _on_done(msg):
+            if isinstance(msg, str):
+                try:
+                    msg = Message.deserialize(msg)
+                except Exception:
+                    return
+            if msg.context.get("query_id") == qid:
+                q.put(None)
+
+        self.bus.on("speak", _on_speak)
+        self.bus.on("ovos.utterance.handled", _on_done)
+        try:
+            self.bus.emit(Message(
+                "recognizer_loop:utterance",
+                {"utterances": [utterance], "lang": lang},
+                {"query_id": qid, "session": {"session_id": qid}},
+            ))
+            while True:
+                try:
+                    chunk = q.get(timeout=10.0)
+                except queue.Empty:
+                    yield None
+                    return
+                if chunk is None:
+                    yield None
+                    return
+                yield chunk
+        finally:
+            self.bus.remove("speak", _on_speak)
+            self.bus.remove("ovos.utterance.handled", _on_done)
 
     # mycroft handlers - from master -> slave
     def handle_send(self, message: Message):
