@@ -30,13 +30,25 @@ class OVOSAgentProtocol(AgentProtocol):
         if not self.bus or isinstance(self.bus, FakeBus):
             ovos_bus_address = self.config.get("host") or "127.0.0.1"
             ovos_bus_port = self.config.get("port") or 8181
+            timeout = self.config.get("connection_timeout", 10)
             self.bus = MessageBusClient(
                 host=ovos_bus_address,
                 port=ovos_bus_port,
                 emitter=EventEmitter(),
             )
             self.bus.run_in_thread()
-            self.bus.connected_event.wait()
+            # Fail fast instead of blocking forever: a bare ``connected_event.wait()``
+            # hangs indefinitely when no OVOS messagebus is reachable, which silently
+            # stalls whatever hosts this protocol (e.g. HiveMindService.run() never
+            # binds its network listeners). Raise a clear, actionable error instead.
+            if not self.bus.connected_event.wait(timeout):
+                self.bus.close()
+                raise ConnectionError(
+                    f"Could not connect to the OVOS messagebus at "
+                    f"ws://{ovos_bus_address}:{ovos_bus_port} within {timeout}s. "
+                    f"Is the OVOS messagebus running? Start it (e.g. 'ovos-messagebus'), "
+                    f"or set the agent protocol's host/port/connection_timeout in the config."
+                )
         self.register_bus_handlers()
 
     def register_bus_handlers(self):
