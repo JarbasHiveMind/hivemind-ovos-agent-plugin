@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.2a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.2a1) (2026-06-22)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.1a1...0.3.2a1)
+
+**Merged pull requests:**
+
+- fix: fail fast when the OVOS messagebus is unreachable [\#17](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/17) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.3.1a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.1a1) (2026-06-06)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.0a4...0.3.1a1)
