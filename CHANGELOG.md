@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.2a3](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.2a3) (2026-07-04)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.2a2...0.3.2a3)
+
+**Merged pull requests:**
+
+- Update dependency pyee to v13 [\#1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/1) ([renovate[bot]](https://github.com/apps/renovate))
+
 ## [0.3.2a2](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.2a2) (2026-07-04)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.2a1...0.3.2a2)
