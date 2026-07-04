@@ -28,6 +28,7 @@ dependencies = [
 test = [
     "pytest",
     "pytest-cov",
+    "hivescope>=0.5.2a1",
 ]
 # Alias so gh-automations' `pip install -e ".[dev]"` first-attempt path
 # resolves; without `dev` it falls through to a buggy `pip install test`
@@ -35,6 +36,7 @@ test = [
 dev = [
     "pytest",
     "pytest-cov",
+    "hivescope>=0.5.2a1",
 ]
 
 [project.urls]
