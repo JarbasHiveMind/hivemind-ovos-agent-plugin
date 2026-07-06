@@ -33,6 +33,7 @@ class OVOSAgentProtocol(AgentProtocol):
 
     def __post_init__(self):
         endpoints = self._configured_bus_endpoints()
+        self._bus_endpoints = endpoints
         if not self.bus or isinstance(self.bus, FakeBus):
             host, port = endpoints[0]
             self.bus = self._connect_messagebus(host=host, port=port)
@@ -43,6 +44,9 @@ class OVOSAgentProtocol(AgentProtocol):
             self._bus_pool.append(self._connect_messagebus(host=host, port=port))
         self._bus_cycle = itertools.cycle(self._bus_pool)
         self._bus_cycle_lock = threading.Lock()
+        self._bus_reconnect_locks = [
+            threading.Lock() for _ in self._bus_pool
+        ]
         self._inflight_semaphore = threading.BoundedSemaphore(
             self._configured_max_inflight(len(self._bus_pool))
         )
@@ -153,6 +157,17 @@ class OVOSAgentProtocol(AgentProtocol):
             timeout = 10.0
         return max(0.0, timeout)
 
+    def _configured_reconnect_timeout(self) -> float:
+        raw = (
+            self.config.get("reconnect_timeout")
+            or self.config.get("bus_reconnect_timeout")
+        )
+        try:
+            timeout = float(raw if raw is not None else 5)
+        except (TypeError, ValueError):
+            timeout = 5.0
+        return max(0.0, timeout)
+
     def _configured_response_timeout(self) -> float:
         raw = (
             self.config.get("response_timeout")
@@ -213,8 +228,11 @@ class OVOSAgentProtocol(AgentProtocol):
     def register_bus_handlers(self):
         LOG.debug("registering internal OVOS bus handlers")
         for bus in getattr(self, "_bus_pool", [self.bus]):
-            bus.on("hive.send.downstream", self._bind_bus_handler(self.handle_send, bus))
-            bus.on("message", self._bind_bus_handler(self.handle_internal_mycroft, bus))  # catch all
+            self._register_bus_handlers(bus)
+
+    def _register_bus_handlers(self, bus: MessageBusClient):
+        bus.on("hive.send.downstream", self._bind_bus_handler(self.handle_send, bus))
+        bus.on("message", self._bind_bus_handler(self.handle_internal_mycroft, bus))  # catch all
 
     def _bind_bus_handler(self, callback, bus):
         """Bind a handler to its OVOS bus so pooled replies keep client affinity."""
@@ -281,12 +299,23 @@ class OVOSAgentProtocol(AgentProtocol):
 
     def get_bus(self, client=None) -> MessageBusClient:
         """Return the next OVOS bus connection for an injected client message."""
-        bus_pool = getattr(self, "_bus_pool", None)
-        if not bus_pool or len(bus_pool) == 1:
-            bus = self.bus
-        else:
-            with self._bus_cycle_lock:
-                bus = next(self._bus_cycle)
+        _index, bus, candidates = self._next_connected_bus()
+        if bus is None:
+            errors = []
+            for index, candidate in candidates:
+                try:
+                    bus = self._replace_bus(index, candidate)
+                    if self._bus_is_connected(bus):
+                        break
+                except Exception as exc:
+                    errors.append(exc)
+                    bus = None
+            if bus is None:
+                detail = "; ".join(str(exc) for exc in errors[-3:])
+                raise ConnectionError(
+                    "No connected OVOS messagebus in the agent pool"
+                    + (f": {detail}" if detail else "")
+                )
         peer = getattr(client, "peer", None)
         if peer:
             self._remember_client_bus(peer, bus)
@@ -295,6 +324,128 @@ class OVOSAgentProtocol(AgentProtocol):
     def _emit_lock_for_bus(self, bus: MessageBusClient):
         with self._state_lock():
             return self._bus_emit_locks.setdefault(id(bus), threading.RLock())
+
+    def _event_is_set(self, event) -> bool:
+        if event is None:
+            return True
+        is_set = getattr(event, "is_set", None)
+        if callable(is_set):
+            return bool(is_set())
+        wait = getattr(event, "wait", None)
+        if callable(wait):
+            try:
+                return bool(wait(0))
+            except TypeError:
+                return bool(wait())
+        return True
+
+    def _bus_socket_is_connected(self, bus: MessageBusClient) -> bool:
+        client = getattr(bus, "client", None)
+        sock = getattr(client, "sock", None)
+        if sock is None:
+            return True
+        return bool(getattr(sock, "connected", True))
+
+    def _bus_is_connected(self, bus: MessageBusClient) -> bool:
+        if isinstance(bus, FakeBus):
+            return True
+        return (
+            self._event_is_set(getattr(bus, "connected_event", None))
+            and self._bus_socket_is_connected(bus)
+        )
+
+    def _mark_bus_disconnected(self, bus: MessageBusClient, reason: str = ""):
+        event = getattr(bus, "connected_event", None)
+        clear = getattr(event, "clear", None)
+        if callable(clear):
+            clear()
+        try:
+            bus.close()
+        except Exception as exc:
+            LOG.debug(f"Failed to close disconnected OVOS bus: {exc!r}")
+        if reason:
+            LOG.warning(f"Marked OVOS messagebus disconnected: {reason}")
+
+    def _bus_reconnect_lock(self, index: int):
+        locks = getattr(self, "_bus_reconnect_locks", None)
+        pool_size = len(getattr(self, "_bus_pool", []) or [self.bus])
+        if locks is None or len(locks) < pool_size:
+            locks = [threading.Lock() for _ in range(pool_size)]
+            self._bus_reconnect_locks = locks
+        return locks[index]
+
+    def _reset_bus_cycle(self):
+        self._bus_cycle = itertools.cycle(self._bus_pool)
+
+    def _bus_index(self, target: MessageBusClient) -> int:
+        for index, bus in enumerate(getattr(self, "_bus_pool", []) or [self.bus]):
+            if bus is target:
+                return index
+        return 0
+
+    def _next_connected_bus(self):
+        pool = getattr(self, "_bus_pool", None) or [self.bus]
+        if not hasattr(self, "_bus_cycle_lock"):
+            self._bus_cycle_lock = threading.Lock()
+        if not hasattr(self, "_bus_cycle"):
+            self._bus_cycle = itertools.cycle(pool)
+        with self._bus_cycle_lock:
+            disconnected = []
+            for _ in range(len(pool)):
+                bus = next(self._bus_cycle)
+                index = self._bus_index(bus)
+                if self._bus_is_connected(bus):
+                    return index, bus, disconnected
+                disconnected.append((index, bus))
+            return None, None, disconnected
+
+    def _replace_bus(self, index: int, old_bus: MessageBusClient) -> MessageBusClient:
+        lock = self._bus_reconnect_lock(index)
+        timeout = self._configured_reconnect_timeout()
+        if not lock.acquire(timeout=timeout):
+            bus = self._bus_pool[index]
+            if self._bus_is_connected(bus):
+                return bus
+            raise ConnectionError("OVOS messagebus reconnect already in progress")
+
+        try:
+            current = self._bus_pool[index]
+            if current is not old_bus and self._bus_is_connected(current):
+                return current
+
+            endpoints = getattr(self, "_bus_endpoints", None) or [
+                getattr(bus, "_hivemind_ovos_endpoint", None)
+                for bus in self._bus_pool
+            ]
+            endpoint = endpoints[index] if index < len(endpoints) else None
+            if not endpoint or endpoint[0] == "provided":
+                raise ConnectionError("OVOS messagebus endpoint is not reconnectable")
+
+            host, port = endpoint
+            LOG.warning(f"Replacing disconnected OVOS messagebus at ws://{host}:{port}")
+            new_bus = self._connect_messagebus(host=host, port=port)
+            self._register_bus_handlers(new_bus)
+            self._bus_pool[index] = new_bus
+            if index == 0 or self.bus is old_bus:
+                self.bus = self._bus_pool[0]
+            with self._state_lock():
+                stale_peers = [
+                    peer for peer, bus in self._client_bus.items()
+                    if bus is old_bus
+                ]
+                for peer in stale_peers:
+                    self._client_bus.pop(peer, None)
+            if not hasattr(self, "_bus_cycle_lock"):
+                self._bus_cycle_lock = threading.Lock()
+            with self._bus_cycle_lock:
+                self._reset_bus_cycle()
+            try:
+                old_bus.close()
+            except Exception as exc:
+                LOG.debug(f"Failed to close old OVOS bus: {exc!r}")
+            return new_bus
+        finally:
+            lock.release()
 
     def _send_messagebus_checked(self, bus: MessageBusClient, message: Message) -> None:
         """Send over a real OVOS MessageBusClient without swallowing failures.
@@ -336,10 +487,22 @@ class OVOSAgentProtocol(AgentProtocol):
         Newer HiveMind core versions call this hook when present. Older core
         versions still call ``get_bus(client).emit(message)`` directly.
         """
-        bus = self.get_bus(client)
-        with self._emit_lock_for_bus(bus):
-            self._send_messagebus_checked(bus, message)
-        return True
+        last_error = None
+        for attempt in range(2):
+            bus = self.get_bus(client)
+            try:
+                with self._emit_lock_for_bus(bus):
+                    self._send_messagebus_checked(bus, message)
+                return True
+            except Exception as exc:
+                last_error = exc
+                self._mark_bus_disconnected(
+                    bus,
+                    f"{type(exc).__name__} while injecting {message.msg_type}",
+                )
+                if attempt == 0:
+                    continue
+        raise last_error
 
     # Backwards/alternative hook names for core integrations.
     emit_agent_message = emit_client_message
@@ -401,15 +564,43 @@ class OVOSAgentProtocol(AgentProtocol):
             if msg.context.get("query_id") == qid:
                 q.put(None)
 
-        bus = self.get_bus()
-        bus.on("speak", _on_speak)
-        bus.on("ovos.utterance.handled", _on_done)
+        bus = None
         try:
-            bus.emit(Message(
+            message = Message(
                 "recognizer_loop:utterance",
                 {"utterances": [utterance], "lang": lang},
                 {"query_id": qid, "session": {"session_id": qid}},
-            ))
+            )
+            last_error = None
+            for attempt in range(2):
+                bus = self.get_bus()
+                bus.on("speak", _on_speak)
+                bus.on("ovos.utterance.handled", _on_done)
+                try:
+                    with self._emit_lock_for_bus(bus):
+                        self._send_messagebus_checked(bus, message)
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    try:
+                        bus.remove("speak", _on_speak)
+                        bus.remove("ovos.utterance.handled", _on_done)
+                    except Exception:
+                        pass
+                    self._mark_bus_disconnected(
+                        bus,
+                        f"{type(exc).__name__} while sending query {qid}",
+                    )
+                    bus = None
+                    if attempt == 0:
+                        continue
+            else:
+                LOG.warning(
+                    "Could not send OVOS query "
+                    f"for query_id={qid}: {last_error!r}"
+                )
+                yield None
+                return
             while True:
                 try:
                     chunk = q.get(timeout=response_timeout)
@@ -425,11 +616,13 @@ class OVOSAgentProtocol(AgentProtocol):
                     return
                 yield chunk
         finally:
-            try:
-                bus.remove("speak", _on_speak)
-                bus.remove("ovos.utterance.handled", _on_done)
-            finally:
-                semaphore.release()
+            if bus is not None:
+                try:
+                    bus.remove("speak", _on_speak)
+                    bus.remove("ovos.utterance.handled", _on_done)
+                except Exception:
+                    pass
+            semaphore.release()
 
     # mycroft handlers - from master -> slave
     def handle_send(self, message: Message, bus: Optional[MessageBusClient] = None):

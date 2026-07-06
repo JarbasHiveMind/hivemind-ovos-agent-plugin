@@ -121,6 +121,96 @@ class TestBusRegistration:
             created[0],
         ]
 
+    def test_get_bus_skips_disconnected_pool_member(self):
+        class _Event:
+            def __init__(self, connected):
+                self.connected = connected
+
+            def is_set(self):
+                return self.connected
+
+        class _Bus:
+            def __init__(self, connected):
+                self.connected_event = _Event(connected)
+                self.client = type(
+                    "Client",
+                    (),
+                    {"sock": type("Sock", (), {"connected": connected})()},
+                )()
+
+        closed = _Bus(False)
+        open_bus = _Bus(True)
+        agent = OVOSAgentProtocol.__new__(OVOSAgentProtocol)
+        agent.bus = closed
+        agent.config = {}
+        agent._bus_pool = [closed, open_bus]
+        agent._bus_cycle = plugin_module.itertools.cycle(agent._bus_pool)
+        agent._bus_cycle_lock = plugin_module.threading.Lock()
+        agent._bus_reconnect_locks = [
+            plugin_module.threading.Lock(),
+            plugin_module.threading.Lock(),
+        ]
+        agent._client_bus = {}
+        agent._client_send_locks = {}
+        agent._bus_emit_locks = {}
+        agent._client_state_lock = plugin_module.threading.RLock()
+
+        assert agent.get_bus() is open_bus
+
+    def test_get_bus_replaces_disconnected_pool_member(self):
+        class _Event:
+            def __init__(self, connected):
+                self.connected = connected
+
+            def is_set(self):
+                return self.connected
+
+            def wait(self, _timeout):
+                return self.connected
+
+        class _Bus:
+            def __init__(self, connected, name):
+                self.connected_event = _Event(connected)
+                self.client = type(
+                    "Client",
+                    (),
+                    {"sock": type("Sock", (), {"connected": connected})()},
+                )()
+                self.name = name
+                self.closed = False
+                self.handlers = []
+
+            def on(self, event, handler):
+                self.handlers.append((event, handler))
+
+            def close(self):
+                self.closed = True
+
+        old_bus = _Bus(False, "old")
+        new_bus = _Bus(True, "new")
+        agent = OVOSAgentProtocol.__new__(OVOSAgentProtocol)
+        agent.bus = old_bus
+        agent.config = {"bus_reconnect_timeout": 0.01}
+        agent._bus_pool = [old_bus]
+        agent._bus_endpoints = [("ovos-bus", 8181)]
+        agent._bus_cycle = plugin_module.itertools.cycle(agent._bus_pool)
+        agent._bus_cycle_lock = plugin_module.threading.Lock()
+        agent._bus_reconnect_locks = [plugin_module.threading.Lock()]
+        agent._client_bus = {"ws://stale": old_bus}
+        agent._client_send_locks = {}
+        agent._bus_emit_locks = {}
+        agent._client_state_lock = plugin_module.threading.RLock()
+        agent._connect_messagebus = lambda host, port: new_bus
+
+        selected = agent.get_bus()
+
+        assert selected is new_bus
+        assert agent.bus is new_bus
+        assert agent._bus_pool == [new_bus]
+        assert "ws://stale" not in agent._client_bus
+        assert old_bus.closed is True
+        assert any(event == "message" for event, _ in new_bus.handlers)
+
     def test_resolve_hosts_expands_dns_addresses(self, monkeypatch):
         created = []
 
