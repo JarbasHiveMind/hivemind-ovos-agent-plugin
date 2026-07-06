@@ -1,4 +1,6 @@
 import dataclasses
+import itertools
+import threading
 from typing import Dict, Any, Iterator, Optional
 
 from ovos_bus_client import MessageBusClient
@@ -28,33 +30,58 @@ class OVOSAgentProtocol(AgentProtocol):
 
     def __post_init__(self):
         if not self.bus or isinstance(self.bus, FakeBus):
-            ovos_bus_address = self.config.get("host") or "127.0.0.1"
-            ovos_bus_port = self.config.get("port") or 8181
-            timeout = self.config.get("connection_timeout", 10)
-            self.bus = MessageBusClient(
-                host=ovos_bus_address,
-                port=ovos_bus_port,
-                emitter=EventEmitter(),
-            )
-            self.bus.run_in_thread()
-            # Fail fast instead of blocking forever: a bare ``connected_event.wait()``
-            # hangs indefinitely when no OVOS messagebus is reachable, which silently
-            # stalls whatever hosts this protocol (e.g. HiveMindService.run() never
-            # binds its network listeners). Raise a clear, actionable error instead.
-            if not self.bus.connected_event.wait(timeout):
-                self.bus.close()
-                raise ConnectionError(
-                    f"Could not connect to the OVOS messagebus at "
-                    f"ws://{ovos_bus_address}:{ovos_bus_port} within {timeout}s. "
-                    f"Is the OVOS messagebus running? Start it (e.g. 'ovos-messagebus'), "
-                    f"or set the agent protocol's host/port/connection_timeout in the config."
-                )
+            self.bus = self._connect_messagebus()
+        self._bus_pool = [self.bus]
+        for _ in range(max(1, self._configured_pool_size()) - 1):
+            self._bus_pool.append(self._connect_messagebus())
+        self._bus_cycle = itertools.cycle(self._bus_pool)
+        self._bus_cycle_lock = threading.Lock()
         self.register_bus_handlers()
+
+    def _configured_pool_size(self) -> int:
+        try:
+            pool_size = int(self.config.get("pool_size", 1))
+        except (TypeError, ValueError):
+            pool_size = 1
+        return max(1, pool_size)
+
+    def _connect_messagebus(self) -> MessageBusClient:
+        ovos_bus_address = self.config.get("host") or "127.0.0.1"
+        ovos_bus_port = self.config.get("port") or 8181
+        timeout = self.config.get("connection_timeout", 10)
+        bus = MessageBusClient(
+            host=ovos_bus_address,
+            port=ovos_bus_port,
+            emitter=EventEmitter(),
+        )
+        bus.run_in_thread()
+        # Fail fast instead of blocking forever: a bare ``connected_event.wait()``
+        # hangs indefinitely when no OVOS messagebus is reachable, which silently
+        # stalls whatever hosts this protocol (e.g. HiveMindService.run() never
+        # binds its network listeners). Raise a clear, actionable error instead.
+        if not bus.connected_event.wait(timeout):
+            bus.close()
+            raise ConnectionError(
+                f"Could not connect to the OVOS messagebus at "
+                f"ws://{ovos_bus_address}:{ovos_bus_port} within {timeout}s. "
+                f"Is the OVOS messagebus running? Start it (e.g. 'ovos-messagebus'), "
+                f"or set the agent protocol's host/port/connection_timeout in the config."
+            )
+        return bus
 
     def register_bus_handlers(self):
         LOG.debug("registering internal OVOS bus handlers")
-        self.bus.on("hive.send.downstream", self.handle_send)
-        self.bus.on("message", self.handle_internal_mycroft)  # catch all
+        for bus in getattr(self, "_bus_pool", [self.bus]):
+            bus.on("hive.send.downstream", self.handle_send)
+            bus.on("message", self.handle_internal_mycroft)  # catch all
+
+    def get_bus(self, client=None) -> MessageBusClient:
+        """Return the next OVOS bus connection for an injected client message."""
+        bus_pool = getattr(self, "_bus_pool", None)
+        if not bus_pool or len(bus_pool) == 1:
+            return self.bus
+        with self._bus_cycle_lock:
+            return next(self._bus_cycle)
 
     def _send_to_client(self, peer: str, client, hmessage: HiveMessage) -> bool:
         """Send a HiveMessage without letting stale sockets break bus dispatch."""
@@ -98,10 +125,11 @@ class OVOSAgentProtocol(AgentProtocol):
             if msg.context.get("query_id") == qid:
                 q.put(None)
 
-        self.bus.on("speak", _on_speak)
-        self.bus.on("ovos.utterance.handled", _on_done)
+        bus = self.get_bus()
+        bus.on("speak", _on_speak)
+        bus.on("ovos.utterance.handled", _on_done)
         try:
-            self.bus.emit(Message(
+            bus.emit(Message(
                 "recognizer_loop:utterance",
                 {"utterances": [utterance], "lang": lang},
                 {"query_id": qid, "session": {"session_id": qid}},
@@ -117,8 +145,8 @@ class OVOSAgentProtocol(AgentProtocol):
                     return
                 yield chunk
         finally:
-            self.bus.remove("speak", _on_speak)
-            self.bus.remove("ovos.utterance.handled", _on_done)
+            bus.remove("speak", _on_speak)
+            bus.remove("ovos.utterance.handled", _on_done)
 
     # mycroft handlers - from master -> slave
     def handle_send(self, message: Message):
