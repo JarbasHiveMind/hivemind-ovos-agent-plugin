@@ -5,7 +5,9 @@ import threading
 from typing import Dict, Any, Iterator, Optional
 
 from ovos_bus_client import MessageBusClient
+from ovos_bus_client.client.client import _maybe_encrypt, json_dumps
 from ovos_bus_client.message import Message
+from ovos_bus_client.session import Session, SessionManager
 from ovos_config import Configuration
 from ovos_utils.fakebus import FakeBus
 from ovos_utils.log import LOG
@@ -47,6 +49,7 @@ class OVOSAgentProtocol(AgentProtocol):
         self._inflight_timeout = self._configured_inflight_timeout()
         self._client_bus = {}
         self._client_send_locks = {}
+        self._bus_emit_locks = {}
         self._client_state_lock = threading.RLock()
         self._log_bus_pool_ready()
         self.register_bus_handlers()
@@ -232,6 +235,8 @@ class OVOSAgentProtocol(AgentProtocol):
             self._client_bus = {}
         if not hasattr(self, "_client_send_locks"):
             self._client_send_locks = {}
+        if not hasattr(self, "_bus_emit_locks"):
+            self._bus_emit_locks = {}
         return lock
 
     def _remember_client_bus(self, peer: str, bus: MessageBusClient):
@@ -286,6 +291,59 @@ class OVOSAgentProtocol(AgentProtocol):
         if peer:
             self._remember_client_bus(peer, bus)
         return bus
+
+    def _emit_lock_for_bus(self, bus: MessageBusClient):
+        with self._state_lock():
+            return self._bus_emit_locks.setdefault(id(bus), threading.RLock())
+
+    def _send_messagebus_checked(self, bus: MessageBusClient, message: Message) -> None:
+        """Send over a real OVOS MessageBusClient without swallowing failures.
+
+        MessageBusClient.emit logs websocket send errors internally and returns
+        normally. For HiveMind upstream injection, core needs a truthful failure
+        signal so it can avoid counting the message as observed/delivered.
+        """
+        emit_checked = getattr(bus, "emit_checked", None)
+        if callable(emit_checked):
+            emit_checked(message)
+            return
+
+        client = getattr(bus, "client", None)
+        if client is None or not hasattr(client, "send"):
+            bus.emit(message)
+            return
+
+        connected_event = getattr(bus, "connected_event", None)
+        if connected_event is not None and not connected_event.wait(10):
+            if not getattr(bus, "started_running", False):
+                raise ValueError("Message bus is not running")
+            connected_event.wait()
+
+        if "session" not in message.context:
+            session_id = getattr(bus, "session_id", "default")
+            sess = SessionManager.sessions.get(session_id) or Session(session_id)
+            message.context["session"] = sess.serialize()
+
+        if hasattr(message, "serialize"):
+            payload = message.serialize()
+        else:
+            payload = json_dumps(message.__dict__)
+        client.send(_maybe_encrypt(payload))
+
+    def emit_client_message(self, message: Message, client=None) -> bool:
+        """Inject a HiveMind client message into OVOS with bus affinity.
+
+        Newer HiveMind core versions call this hook when present. Older core
+        versions still call ``get_bus(client).emit(message)`` directly.
+        """
+        bus = self.get_bus(client)
+        with self._emit_lock_for_bus(bus):
+            self._send_messagebus_checked(bus, message)
+        return True
+
+    # Backwards/alternative hook names for core integrations.
+    emit_agent_message = emit_client_message
+    inject_agent_message = emit_client_message
 
     def _send_to_client(self, peer: str, client, hmessage: HiveMessage) -> bool:
         """Send a HiveMessage without letting stale sockets break bus dispatch."""

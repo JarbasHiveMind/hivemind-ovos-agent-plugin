@@ -2,6 +2,8 @@
 
 import hivemind_ovos_agent_plugin as plugin_module
 from hivemind_ovos_agent_plugin import OVOSAgentProtocol
+from ovos_bus_client.message import Message
+import pytest
 
 
 class TestBusRegistration:
@@ -180,3 +182,89 @@ class TestBusRegistration:
         agent.config = {"pool_size": 3, "max_inflight": 7}
 
         assert agent._configured_max_inflight(pool_size=3) == 7
+
+    def test_emit_client_message_uses_checked_send_and_affinity(self):
+        sent = []
+
+        class _ConnectedEvent:
+            def wait(self, _timeout):
+                return True
+
+        class _Client:
+            def send(self, payload):
+                sent.append(payload)
+
+        class _Bus:
+            client = _Client()
+            connected_event = _ConnectedEvent()
+            session_id = "test-session"
+            started_running = True
+
+        bus = _Bus()
+        agent = OVOSAgentProtocol.__new__(OVOSAgentProtocol)
+        agent.bus = bus
+        agent.config = {}
+        agent._bus_pool = [bus]
+        agent._client_bus = {}
+        agent._client_send_locks = {}
+        agent._bus_emit_locks = {}
+        agent._client_state_lock = plugin_module.threading.RLock()
+
+        client = type("Client", (), {"peer": "ws://alice"})()
+        message = Message("recognizer_loop:utterance", {"utterances": ["hi"]}, {})
+
+        assert agent.emit_client_message(message, client) is True
+        assert agent._client_bus["ws://alice"] is bus
+        assert sent
+        assert "recognizer_loop:utterance" in sent[0]
+
+    def test_emit_client_message_prefers_bus_emit_checked(self):
+        class _Bus:
+            def __init__(self):
+                self.messages = []
+
+            def emit_checked(self, message):
+                self.messages.append(message)
+
+        bus = _Bus()
+        agent = OVOSAgentProtocol.__new__(OVOSAgentProtocol)
+        agent.bus = bus
+        agent.config = {}
+        agent._bus_pool = [bus]
+        agent._client_bus = {}
+        agent._client_send_locks = {}
+        agent._bus_emit_locks = {}
+        agent._client_state_lock = plugin_module.threading.RLock()
+
+        message = Message("recognizer_loop:utterance", {"utterances": ["hi"]}, {})
+
+        assert agent.emit_client_message(message, None) is True
+        assert bus.messages == [message]
+
+    def test_emit_client_message_raises_send_failures(self):
+        class _ConnectedEvent:
+            def wait(self, _timeout):
+                return True
+
+        class _Client:
+            def send(self, _payload):
+                raise RuntimeError("socket closed")
+
+        class _Bus:
+            client = _Client()
+            connected_event = _ConnectedEvent()
+            session_id = "test-session"
+            started_running = True
+
+        bus = _Bus()
+        agent = OVOSAgentProtocol.__new__(OVOSAgentProtocol)
+        agent.bus = bus
+        agent.config = {}
+        agent._bus_pool = [bus]
+        agent._client_bus = {}
+        agent._client_send_locks = {}
+        agent._bus_emit_locks = {}
+        agent._client_state_lock = plugin_module.threading.RLock()
+
+        with pytest.raises(RuntimeError, match="socket closed"):
+            agent.emit_client_message(Message("speak", {}, {}), None)
