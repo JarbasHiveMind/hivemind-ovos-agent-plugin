@@ -1,5 +1,6 @@
 import dataclasses
 import itertools
+import socket
 import threading
 from typing import Dict, Any, Iterator, Optional
 
@@ -29,16 +30,17 @@ class OVOSAgentProtocol(AgentProtocol):
     config: Dict[str, Any] = dataclasses.field(default_factory=lambda: Configuration().get("websocket", {}))
 
     def __post_init__(self):
+        endpoints = self._configured_bus_endpoints()
         if not self.bus or isinstance(self.bus, FakeBus):
-            self.bus = self._connect_messagebus()
-        pool_size = self._configured_pool_size()
+            host, port = endpoints[0]
+            self.bus = self._connect_messagebus(host=host, port=port)
         self._bus_pool = [self.bus]
-        for _ in range(pool_size - 1):
-            self._bus_pool.append(self._connect_messagebus())
+        for host, port in endpoints[1:]:
+            self._bus_pool.append(self._connect_messagebus(host=host, port=port))
         self._bus_cycle = itertools.cycle(self._bus_pool)
         self._bus_cycle_lock = threading.Lock()
         self._inflight_semaphore = threading.BoundedSemaphore(
-            self._configured_max_inflight(pool_size)
+            self._configured_max_inflight(len(self._bus_pool))
         )
         self._inflight_timeout = self._configured_inflight_timeout()
         self._client_bus = {}
@@ -52,6 +54,78 @@ class OVOSAgentProtocol(AgentProtocol):
         except (TypeError, ValueError):
             pool_size = 1
         return max(1, pool_size)
+
+    def _configured_bus_endpoints(self) -> list[tuple[str, int]]:
+        endpoints = self._configured_endpoint_list()
+        if not endpoints:
+            host = self.config.get("host") or "127.0.0.1"
+            port = self._configured_bus_port()
+            endpoints = self._resolve_bus_host(host, port)
+
+        pool_size = max(self._configured_pool_size(), len(endpoints))
+        return list(itertools.islice(itertools.cycle(endpoints), pool_size))
+
+    def _configured_endpoint_list(self) -> list[tuple[str, int]]:
+        raw = (
+            self.config.get("endpoints")
+            or self.config.get("hosts")
+            or self.config.get("bus_hosts")
+        )
+        if not raw:
+            return []
+        if isinstance(raw, str):
+            raw = [item.strip() for item in raw.split(",") if item.strip()]
+        if not isinstance(raw, list):
+            return []
+
+        endpoints: list[tuple[str, int]] = []
+        default_port = self._configured_bus_port()
+        for item in raw:
+            if isinstance(item, dict):
+                host = item.get("host")
+                port = item.get("port", default_port)
+            else:
+                host, port = self._split_endpoint(str(item), default_port)
+            if host:
+                try:
+                    endpoints.append((str(host), int(port)))
+                except (TypeError, ValueError):
+                    endpoints.append((str(host), default_port))
+        return endpoints
+
+    def _split_endpoint(self, value: str, default_port: int) -> tuple[str, int]:
+        if value.count(":") == 1:
+            host, raw_port = value.rsplit(":", 1)
+            try:
+                return host, int(raw_port)
+            except ValueError:
+                pass
+        return value, default_port
+
+    def _configured_bus_port(self) -> int:
+        try:
+            return int(self.config.get("port") or 8181)
+        except (TypeError, ValueError):
+            return 8181
+
+    def _resolve_bus_host(self, host: str, port: int) -> list[tuple[str, int]]:
+        if not (self.config.get("resolve_hosts") or self.config.get("resolve_all")):
+            return [(host, port)]
+        try:
+            infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        except socket.gaierror as exc:
+            LOG.warning(f"Could not resolve OVOS bus host {host}: {exc}")
+            return [(host, port)]
+
+        seen: set[tuple[str, int]] = set()
+        endpoints: list[tuple[str, int]] = []
+        for info in infos:
+            address = info[4][0]
+            endpoint = (address, port)
+            if endpoint not in seen:
+                seen.add(endpoint)
+                endpoints.append(endpoint)
+        return endpoints or [(host, port)]
 
     def _configured_max_inflight(self, pool_size: Optional[int] = None) -> int:
         raw_limit = self.config.get("max_inflight", self.config.get("max_in_flight"))
@@ -81,9 +155,9 @@ class OVOSAgentProtocol(AgentProtocol):
             self._inflight_semaphore = semaphore
         return semaphore, getattr(self, "_inflight_timeout", self._configured_inflight_timeout())
 
-    def _connect_messagebus(self) -> MessageBusClient:
-        ovos_bus_address = self.config.get("host") or "127.0.0.1"
-        ovos_bus_port = self.config.get("port") or 8181
+    def _connect_messagebus(self, host: Optional[str] = None, port: Optional[int] = None) -> MessageBusClient:
+        ovos_bus_address = host or self.config.get("host") or "127.0.0.1"
+        ovos_bus_port = port or self._configured_bus_port()
         timeout = self.config.get("connection_timeout", 10)
         bus = MessageBusClient(
             host=ovos_bus_address,

@@ -70,6 +70,103 @@ class TestBusRegistration:
         selected = agent.get_bus(client)
         assert agent._client_bus["ws://alice"] is selected
 
+    def test_endpoint_list_spreads_pool_across_hosts(self, monkeypatch):
+        created = []
+
+        class _ConnectedEvent:
+            def wait(self, _timeout):
+                return True
+
+        class _Bus:
+            def __init__(self, host=None, port=None, emitter=None):
+                self.host = host
+                self.port = port
+                self.emitter = emitter
+                self.connected_event = _ConnectedEvent()
+                self.handlers = []
+                created.append(self)
+
+            def run_in_thread(self):
+                return None
+
+            def on(self, event, handler):
+                self.handlers.append((event, handler))
+
+            def close(self):
+                return None
+
+        monkeypatch.setattr(plugin_module, "MessageBusClient", _Bus)
+
+        agent = OVOSAgentProtocol(config={
+            "endpoints": [
+                {"host": "ovos-bus-0", "port": 8181},
+                "ovos-bus-1:8182",
+            ],
+            "pool_size": 4,
+        })
+
+        assert [(bus.host, bus.port) for bus in created] == [
+            ("ovos-bus-0", 8181),
+            ("ovos-bus-1", 8182),
+            ("ovos-bus-0", 8181),
+            ("ovos-bus-1", 8182),
+        ]
+        assert [agent.get_bus() for _ in range(5)] == [
+            created[0],
+            created[1],
+            created[2],
+            created[3],
+            created[0],
+        ]
+
+    def test_resolve_hosts_expands_dns_addresses(self, monkeypatch):
+        created = []
+
+        class _ConnectedEvent:
+            def wait(self, _timeout):
+                return True
+
+        class _Bus:
+            def __init__(self, host=None, port=None, emitter=None):
+                self.host = host
+                self.port = port
+                self.emitter = emitter
+                self.connected_event = _ConnectedEvent()
+                self.handlers = []
+                created.append(self)
+
+            def run_in_thread(self):
+                return None
+
+            def on(self, event, handler):
+                self.handlers.append((event, handler))
+
+            def close(self):
+                return None
+
+        def _getaddrinfo(host, port, *args, **kwargs):
+            assert host == "ovos-headless"
+            assert port == 8181
+            return [
+                (None, None, None, None, ("10.42.1.10", port)),
+                (None, None, None, None, ("10.42.1.11", port)),
+                (None, None, None, None, ("10.42.1.10", port)),
+            ]
+
+        monkeypatch.setattr(plugin_module, "MessageBusClient", _Bus)
+        monkeypatch.setattr(plugin_module.socket, "getaddrinfo", _getaddrinfo)
+
+        OVOSAgentProtocol(config={
+            "host": "ovos-headless",
+            "port": 8181,
+            "resolve_hosts": True,
+        })
+
+        assert [(bus.host, bus.port) for bus in created] == [
+            ("10.42.1.10", 8181),
+            ("10.42.1.11", 8181),
+        ]
+
     def test_inflight_limit_defaults_from_pool_size(self, fake_bus):
         agent = OVOSAgentProtocol.__new__(OVOSAgentProtocol)
         agent.bus = fake_bus
