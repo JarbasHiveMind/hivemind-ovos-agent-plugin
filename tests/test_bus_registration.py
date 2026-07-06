@@ -8,13 +8,13 @@ class TestBusRegistration:
     def test_registers_hive_send_downstream(self, agent, fake_bus):
         # FakeBus stores listeners on its internal emitter
         listeners = fake_bus.ee.listeners("hive.send.downstream")
-        assert any(l.__func__ is OVOSAgentProtocol.handle_send for l in listeners) or \
+        assert any(getattr(l, "__func__", None) is OVOSAgentProtocol.handle_send for l in listeners) or \
                any(getattr(l, "__name__", "") == "handle_send" for l in listeners)
 
     def test_registers_catch_all_message_listener(self, agent, fake_bus):
         listeners = fake_bus.ee.listeners("message")
         assert any(getattr(l, "__name__", "") == "handle_internal_mycroft" for l in listeners) or \
-               any(l.__func__ is OVOSAgentProtocol.handle_internal_mycroft for l in listeners)
+               any(getattr(l, "__func__", None) is OVOSAgentProtocol.handle_internal_mycroft for l in listeners)
 
     def test_bus_field_is_kept(self, agent, fake_bus):
         """The bus the plugin operates on is the one we wired in."""
@@ -52,9 +52,23 @@ class TestBusRegistration:
         assert len(created) == 3
         assert agent.bus is created[0]
         assert [bus.host for bus in created] == ["ovos-bus"] * 3
-        assert all(("hive.send.downstream", agent.handle_send) in bus.handlers for bus in created)
-        assert all(("message", agent.handle_internal_mycroft) in bus.handlers for bus in created)
+        assert all(any(
+            event == "hive.send.downstream"
+            and getattr(handler, "__name__", "") == "handle_send"
+            and getattr(handler, "_hivemind_bus", None) is bus
+            for event, handler in bus.handlers
+        ) for bus in created)
+        assert all(any(
+            event == "message"
+            and getattr(handler, "__name__", "") == "handle_internal_mycroft"
+            and getattr(handler, "_hivemind_bus", None) is bus
+            for event, handler in bus.handlers
+        ) for bus in created)
         assert [agent.get_bus() for _ in range(4)] == [created[0], created[1], created[2], created[0]]
+
+        client = type("Client", (), {"peer": "ws://alice"})()
+        selected = agent.get_bus(client)
+        assert agent._client_bus["ws://alice"] is selected
 
     def test_inflight_limit_defaults_from_pool_size(self, fake_bus):
         agent = OVOSAgentProtocol.__new__(OVOSAgentProtocol)

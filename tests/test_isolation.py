@@ -93,3 +93,21 @@ class TestClientIsolation:
 
         sent = alice.send.call_args[0][0]
         assert sent.payload.context.get("source") == "hive"
+
+    def test_pooled_reply_only_uses_the_clients_assigned_bus(self, agent, make_client):
+        """A bus pool may hear the same OVOS reply on multiple sockets.
+
+        Only the bus that accepted the client request should write back to that
+        client's websocket.
+        """
+        assigned_bus = object()
+        other_bus = object()
+        alice = make_client("ws://alice")
+        agent.hm_protocol.clients = {"ws://alice": alice}
+        agent._remember_client_bus("ws://alice", assigned_bus)
+
+        payload = _ovos_internal("speak", destination="ws://alice")
+        agent.handle_internal_mycroft(payload, bus=other_bus)
+        agent.handle_internal_mycroft(payload, bus=assigned_bus)
+
+        alice.send.assert_called_once()

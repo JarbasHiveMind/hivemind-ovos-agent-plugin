@@ -41,6 +41,9 @@ class OVOSAgentProtocol(AgentProtocol):
             self._configured_max_inflight(pool_size)
         )
         self._inflight_timeout = self._configured_inflight_timeout()
+        self._client_bus = {}
+        self._client_send_locks = {}
+        self._client_state_lock = threading.RLock()
         self.register_bus_handlers()
 
     def _configured_pool_size(self) -> int:
@@ -105,29 +108,78 @@ class OVOSAgentProtocol(AgentProtocol):
     def register_bus_handlers(self):
         LOG.debug("registering internal OVOS bus handlers")
         for bus in getattr(self, "_bus_pool", [self.bus]):
-            bus.on("hive.send.downstream", self.handle_send)
-            bus.on("message", self.handle_internal_mycroft)  # catch all
+            bus.on("hive.send.downstream", self._bind_bus_handler(self.handle_send, bus))
+            bus.on("message", self._bind_bus_handler(self.handle_internal_mycroft, bus))  # catch all
+
+    def _bind_bus_handler(self, callback, bus):
+        """Bind a handler to its OVOS bus so pooled replies keep client affinity."""
+
+        def _handler(message, _bus=bus):
+            return callback(message, bus=_bus)
+
+        _handler.__name__ = callback.__name__
+        _handler._hivemind_bus = bus
+        return _handler
+
+    def _state_lock(self):
+        lock = getattr(self, "_client_state_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            self._client_state_lock = lock
+        if not hasattr(self, "_client_bus"):
+            self._client_bus = {}
+        if not hasattr(self, "_client_send_locks"):
+            self._client_send_locks = {}
+        return lock
+
+    def _remember_client_bus(self, peer: str, bus: MessageBusClient):
+        if not peer:
+            return
+        with self._state_lock():
+            self._client_bus[peer] = bus
+            self._client_send_locks.setdefault(peer, threading.RLock())
+
+    def _peer_owns_bus(self, peer: str, bus: Optional[MessageBusClient]) -> bool:
+        if bus is None:
+            return True
+        with self._state_lock():
+            assigned_bus = self._client_bus.get(peer)
+        return assigned_bus is None or assigned_bus is bus
+
+    def _forget_client(self, peer: str, client):
+        try:
+            if self.hm_protocol and self.hm_protocol.clients.get(peer) is client:
+                self.hm_protocol.clients.pop(peer, None)
+                with self._state_lock():
+                    self._client_bus.pop(peer, None)
+                    self._client_send_locks.pop(peer, None)
+        except Exception:
+            LOG.exception(f"Failed to forget disconnected client: {peer}")
 
     def get_bus(self, client=None) -> MessageBusClient:
         """Return the next OVOS bus connection for an injected client message."""
         bus_pool = getattr(self, "_bus_pool", None)
         if not bus_pool or len(bus_pool) == 1:
-            return self.bus
-        with self._bus_cycle_lock:
-            return next(self._bus_cycle)
+            bus = self.bus
+        else:
+            with self._bus_cycle_lock:
+                bus = next(self._bus_cycle)
+        peer = getattr(client, "peer", None)
+        if peer:
+            self._remember_client_bus(peer, bus)
+        return bus
 
     def _send_to_client(self, peer: str, client, hmessage: HiveMessage) -> bool:
         """Send a HiveMessage without letting stale sockets break bus dispatch."""
+        with self._state_lock():
+            lock = self._client_send_locks.setdefault(peer, threading.RLock())
         try:
-            client.send(hmessage)
+            with lock:
+                client.send(hmessage)
             return True
         except Exception as exc:
             LOG.warning(f"Could not send {hmessage.msg_type} to {peer}: {exc}")
-            try:
-                if self.hm_protocol and self.hm_protocol.clients.get(peer) is client:
-                    self.hm_protocol.clients.pop(peer, None)
-            except Exception:
-                LOG.exception(f"Failed to forget disconnected client: {peer}")
+            self._forget_client(peer, client)
             return False
 
     def natural_language_query(self, utterance: str,
@@ -191,7 +243,7 @@ class OVOSAgentProtocol(AgentProtocol):
                 semaphore.release()
 
     # mycroft handlers - from master -> slave
-    def handle_send(self, message: Message):
+    def handle_send(self, message: Message, bus: Optional[MessageBusClient] = None):
         """ovos wants to send a HiveMessage.
 
         A device can be both a master and a slave; downstream messages are handled here.
@@ -210,6 +262,8 @@ class OVOSAgentProtocol(AgentProtocol):
             # only slaves can escalate, ignore silently
             pass
         elif peer:
+            if not self._peer_owns_bus(peer, bus):
+                return
             client = self.clients.get(peer)
             if client is not None:
                 self._send_to_client(peer, client, hmessage)
@@ -222,12 +276,13 @@ class OVOSAgentProtocol(AgentProtocol):
                     )
                 )
 
-    def handle_internal_mycroft(self, message: str):
+    def handle_internal_mycroft(self, message: str, bus: Optional[MessageBusClient] = None):
         """Forward internal messages to clients if they are the target.
 
         Client isolation happens here: clients only get responses to their own messages.
         """
-        message = Message.deserialize(message)
+        if isinstance(message, str):
+            message = Message.deserialize(message)
         target_peers = message.context.get("destination") or []
         if not isinstance(target_peers, list):
             target_peers = [target_peers]
@@ -235,6 +290,8 @@ class OVOSAgentProtocol(AgentProtocol):
         if target_peers:
             for peer, client in list(self.clients.items()):
                 if peer in target_peers:
+                    if not self._peer_owns_bus(peer, bus):
+                        continue
                     LOG.debug(f"{message.msg_type} - destination: {peer}")
                     message.context["source"] = "hive"
                     msg = HiveMessage(

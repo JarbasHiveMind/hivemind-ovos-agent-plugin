@@ -1,5 +1,8 @@
 """Tests for OVOSAgentProtocol.handle_send (downstream dispatch from OVOS bus)."""
 
+import threading
+import time
+
 from ovos_bus_client.message import Message
 from hivemind_bus_client.message import HiveMessage, HiveMessageType
 
@@ -101,3 +104,40 @@ class TestHandleSendFanout:
 
         # ESCALATE goes upstream, not downstream — no client should be sent to
         c.send.assert_not_called()
+
+
+class TestClientSendLocking:
+    def test_client_writes_are_serialized_per_peer(self, agent):
+        state_lock = threading.Lock()
+        active = 0
+        max_active = 0
+        sent = []
+
+        class _Client:
+            def send(self, message):
+                nonlocal active, max_active
+                with state_lock:
+                    active += 1
+                    max_active = max(max_active, active)
+                time.sleep(0.02)
+                sent.append(message)
+                with state_lock:
+                    active -= 1
+
+        client = _Client()
+        hmessage = HiveMessage(HiveMessageType.BUS, payload={})
+        threads = [
+            threading.Thread(
+                target=agent._send_to_client,
+                args=("ws://alice", client, hmessage),
+            )
+            for _ in range(5)
+        ]
+
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert len(sent) == 5
+        assert max_active == 1
