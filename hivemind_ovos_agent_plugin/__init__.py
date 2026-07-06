@@ -31,11 +31,16 @@ class OVOSAgentProtocol(AgentProtocol):
     def __post_init__(self):
         if not self.bus or isinstance(self.bus, FakeBus):
             self.bus = self._connect_messagebus()
+        pool_size = self._configured_pool_size()
         self._bus_pool = [self.bus]
-        for _ in range(max(1, self._configured_pool_size()) - 1):
+        for _ in range(pool_size - 1):
             self._bus_pool.append(self._connect_messagebus())
         self._bus_cycle = itertools.cycle(self._bus_pool)
         self._bus_cycle_lock = threading.Lock()
+        self._inflight_semaphore = threading.BoundedSemaphore(
+            self._configured_max_inflight(pool_size)
+        )
+        self._inflight_timeout = self._configured_inflight_timeout()
         self.register_bus_handlers()
 
     def _configured_pool_size(self) -> int:
@@ -44,6 +49,34 @@ class OVOSAgentProtocol(AgentProtocol):
         except (TypeError, ValueError):
             pool_size = 1
         return max(1, pool_size)
+
+    def _configured_max_inflight(self, pool_size: Optional[int] = None) -> int:
+        raw_limit = self.config.get("max_inflight", self.config.get("max_in_flight"))
+        if raw_limit is not None:
+            try:
+                return max(1, int(raw_limit))
+            except (TypeError, ValueError):
+                pass
+        try:
+            per_bus = int(self.config.get("inflight_per_bus", 4))
+        except (TypeError, ValueError):
+            per_bus = 4
+        return max(1, (pool_size or self._configured_pool_size()) * max(1, per_bus))
+
+    def _configured_inflight_timeout(self) -> float:
+        try:
+            timeout = float(self.config.get("inflight_timeout", 10))
+        except (TypeError, ValueError):
+            timeout = 10.0
+        return max(0.0, timeout)
+
+    def _inflight_gate(self) -> tuple[threading.BoundedSemaphore, float]:
+        semaphore = getattr(self, "_inflight_semaphore", None)
+        if semaphore is None:
+            pool_size = len(getattr(self, "_bus_pool", []) or [self.bus])
+            semaphore = threading.BoundedSemaphore(self._configured_max_inflight(pool_size))
+            self._inflight_semaphore = semaphore
+        return semaphore, getattr(self, "_inflight_timeout", self._configured_inflight_timeout())
 
     def _connect_messagebus(self) -> MessageBusClient:
         ovos_bus_address = self.config.get("host") or "127.0.0.1"
@@ -104,6 +137,12 @@ class OVOSAgentProtocol(AgentProtocol):
         correlated by a fresh query-scoped session so they are not reverse-routed."""
         import queue
         import uuid
+        semaphore, inflight_timeout = self._inflight_gate()
+        if not semaphore.acquire(timeout=inflight_timeout):
+            LOG.warning("Timed out waiting for an OVOS query slot")
+            yield None
+            return
+
         qid = uuid.uuid4().hex
         q: "queue.Queue" = queue.Queue()
 
@@ -145,8 +184,11 @@ class OVOSAgentProtocol(AgentProtocol):
                     return
                 yield chunk
         finally:
-            bus.remove("speak", _on_speak)
-            bus.remove("ovos.utterance.handled", _on_done)
+            try:
+                bus.remove("speak", _on_speak)
+                bus.remove("ovos.utterance.handled", _on_done)
+            finally:
+                semaphore.release()
 
     # mycroft handlers - from master -> slave
     def handle_send(self, message: Message):

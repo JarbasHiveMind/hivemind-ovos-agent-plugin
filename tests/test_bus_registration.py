@@ -55,3 +55,17 @@ class TestBusRegistration:
         assert all(("hive.send.downstream", agent.handle_send) in bus.handlers for bus in created)
         assert all(("message", agent.handle_internal_mycroft) in bus.handlers for bus in created)
         assert [agent.get_bus() for _ in range(4)] == [created[0], created[1], created[2], created[0]]
+
+    def test_inflight_limit_defaults_from_pool_size(self, fake_bus):
+        agent = OVOSAgentProtocol.__new__(OVOSAgentProtocol)
+        agent.bus = fake_bus
+        agent.config = {"pool_size": 3}
+
+        assert agent._configured_max_inflight(pool_size=3) == 12
+
+    def test_inflight_limit_can_be_overridden(self, fake_bus):
+        agent = OVOSAgentProtocol.__new__(OVOSAgentProtocol)
+        agent.bus = fake_bus
+        agent.config = {"pool_size": 3, "max_inflight": 7}
+
+        assert agent._configured_max_inflight(pool_size=3) == 7
