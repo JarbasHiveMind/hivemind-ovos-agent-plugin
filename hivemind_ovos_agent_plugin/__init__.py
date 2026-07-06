@@ -147,6 +147,18 @@ class OVOSAgentProtocol(AgentProtocol):
             timeout = 10.0
         return max(0.0, timeout)
 
+    def _configured_response_timeout(self) -> float:
+        raw = (
+            self.config.get("response_timeout")
+            or self.config.get("query_response_timeout")
+            or self.config.get("utterance_timeout")
+        )
+        try:
+            timeout = float(raw if raw is not None else 10)
+        except (TypeError, ValueError):
+            timeout = 10.0
+        return max(0.0, timeout)
+
     def _inflight_gate(self) -> tuple[threading.BoundedSemaphore, float]:
         semaphore = getattr(self, "_inflight_semaphore", None)
         if semaphore is None:
@@ -271,6 +283,7 @@ class OVOSAgentProtocol(AgentProtocol):
 
         qid = uuid.uuid4().hex
         q: "queue.Queue" = queue.Queue()
+        response_timeout = self._configured_response_timeout()
 
         def _on_speak(msg):
             if isinstance(msg, str):
@@ -301,8 +314,12 @@ class OVOSAgentProtocol(AgentProtocol):
             ))
             while True:
                 try:
-                    chunk = q.get(timeout=10.0)
+                    chunk = q.get(timeout=response_timeout)
                 except queue.Empty:
+                    LOG.warning(
+                        "Timed out waiting for OVOS response "
+                        f"for query_id={qid} after {response_timeout}s"
+                    )
                     yield None
                     return
                 if chunk is None:
