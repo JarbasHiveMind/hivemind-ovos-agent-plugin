@@ -38,6 +38,24 @@ class TestHandleSendDirect:
         agent.handle_send(_send_msg(HiveMessageType.BUS, peer=peer, payload={}))
 
         client.send.assert_called_once()
+        client.disconnect.assert_called_once()
+        assert agent.hm_protocol.clients == {}
+
+    def test_stale_peer_disconnect_failure_does_not_break_dispatch(self, agent, make_client):
+        peer = "ws://stale"
+        client = make_client(peer)
+        client.send.side_effect = RuntimeError("closed")
+        client.disconnect.side_effect = RuntimeError("already closed")
+        agent.hm_protocol.clients = {peer: client}
+
+        sent = agent._send_to_client(
+            peer,
+            client,
+            HiveMessage(HiveMessageType.BUS, payload={}),
+        )
+
+        assert sent is False
+        client.disconnect.assert_called_once()
         assert agent.hm_protocol.clients == {}
 
     def test_unknown_peer_emits_error_on_bus(self, agent, make_client, fake_bus):
@@ -83,6 +101,7 @@ class TestHandleSendFanout:
         agent.handle_send(_send_msg(HiveMessageType.PROPAGATE, peer=peers[0], payload={}))
 
         clients["ws://stale"].send.assert_called_once()
+        clients["ws://stale"].disconnect.assert_called_once()
         clients["ws://alive"].send.assert_called_once()
         assert agent.hm_protocol.clients == {"ws://alive": clients["ws://alive"]}
 

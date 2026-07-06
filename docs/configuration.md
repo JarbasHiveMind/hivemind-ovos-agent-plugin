@@ -79,3 +79,7 @@ If `resolve_hosts` returns four runtime pod addresses and `pool_size` is `8`, th
 plugin opens two bus connections per address and round-robins client traffic across
 the full pool. This avoids depending on a ClusterIP service to balance long-lived
 websocket connections.
+
+At startup the plugin logs the final bus pool size, resolved endpoints, and request
+gate. That line is useful in Kubernetes because it proves whether the listener is
+actually connected across runtime pods or only talking to one messagebus backend.

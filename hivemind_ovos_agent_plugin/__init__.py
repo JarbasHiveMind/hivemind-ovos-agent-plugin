@@ -34,6 +34,8 @@ class OVOSAgentProtocol(AgentProtocol):
         if not self.bus or isinstance(self.bus, FakeBus):
             host, port = endpoints[0]
             self.bus = self._connect_messagebus(host=host, port=port)
+        else:
+            setattr(self.bus, "_hivemind_ovos_endpoint", ("provided", 0))
         self._bus_pool = [self.bus]
         for host, port in endpoints[1:]:
             self._bus_pool.append(self._connect_messagebus(host=host, port=port))
@@ -46,6 +48,7 @@ class OVOSAgentProtocol(AgentProtocol):
         self._client_bus = {}
         self._client_send_locks = {}
         self._client_state_lock = threading.RLock()
+        self._log_bus_pool_ready()
         self.register_bus_handlers()
 
     def _configured_pool_size(self) -> int:
@@ -189,7 +192,20 @@ class OVOSAgentProtocol(AgentProtocol):
                 f"Is the OVOS messagebus running? Start it (e.g. 'ovos-messagebus'), "
                 f"or set the agent protocol's host/port/connection_timeout in the config."
             )
+        setattr(bus, "_hivemind_ovos_endpoint", (ovos_bus_address, ovos_bus_port))
         return bus
+
+    def _log_bus_pool_ready(self):
+        pool = getattr(self, "_bus_pool", []) or [self.bus]
+        endpoints = [
+            getattr(bus, "_hivemind_ovos_endpoint", ("unknown", 0))
+            for bus in pool
+        ]
+        LOG.info(
+            "OVOS bus pool ready: "
+            f"size={len(pool)} endpoints={endpoints} "
+            f"max_inflight={self._configured_max_inflight(len(pool))}"
+        )
 
     def register_bus_handlers(self):
         LOG.debug("registering internal OVOS bus handlers")
@@ -232,13 +248,29 @@ class OVOSAgentProtocol(AgentProtocol):
             assigned_bus = self._client_bus.get(peer)
         return assigned_bus is None or assigned_bus is bus
 
-    def _forget_client(self, peer: str, client):
+    def _disconnect_client(self, peer: str, client, reason: str):
+        disconnect = getattr(client, "disconnect", None)
+        if not callable(disconnect):
+            return
+        try:
+            LOG.info(f"Disconnecting stale HiveMind client {peer}: {reason}")
+            disconnect()
+        except Exception as exc:
+            LOG.warning(
+                "Failed to disconnect stale HiveMind client "
+                f"{peer}: {type(exc).__name__}: {exc!r}"
+            )
+
+    def _forget_client(self, peer: str, client, *, disconnect: bool = False,
+                       reason: str = "stale downstream socket"):
         try:
             if self.hm_protocol and self.hm_protocol.clients.get(peer) is client:
                 self.hm_protocol.clients.pop(peer, None)
                 with self._state_lock():
                     self._client_bus.pop(peer, None)
                     self._client_send_locks.pop(peer, None)
+                if disconnect:
+                    self._disconnect_client(peer, client, reason)
         except Exception:
             LOG.exception(f"Failed to forget disconnected client: {peer}")
 
@@ -264,8 +296,16 @@ class OVOSAgentProtocol(AgentProtocol):
                 client.send(hmessage)
             return True
         except Exception as exc:
-            LOG.warning(f"Could not send {hmessage.msg_type} to {peer}: {exc}")
-            self._forget_client(peer, client)
+            LOG.warning(
+                "Could not send "
+                f"{hmessage.msg_type} to {peer}: {type(exc).__name__}: {exc!r}"
+            )
+            self._forget_client(
+                peer,
+                client,
+                disconnect=True,
+                reason=f"send failed for {hmessage.msg_type}",
+            )
             return False
 
     def natural_language_query(self, utterance: str,
