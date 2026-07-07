@@ -28,6 +28,56 @@ class TestBusRegistration:
             for listener in listeners
         )
 
+    def test_can_register_direct_response_events(self, fake_bus):
+        agent = OVOSAgentProtocol.__new__(OVOSAgentProtocol)
+        agent.bus = fake_bus
+        agent.config = {
+            "catch_all_responses": False,
+            "response_events": ["speak", "custom.reply"],
+        }
+
+        agent.register_bus_handlers()
+
+        assert not fake_bus.ee.listeners("message")
+        assert any(
+            getattr(listener, "__name__", "") == "handle_internal_mycroft"
+            for listener in fake_bus.ee.listeners("speak")
+        )
+        assert any(
+            getattr(listener, "__name__", "") == "handle_internal_mycroft"
+            for listener in fake_bus.ee.listeners("custom.reply")
+        )
+
+    def test_direct_response_events_keep_pool_affinity(self):
+        class _Bus:
+            def __init__(self):
+                self.handlers = []
+
+            def on(self, event, handler):
+                self.handlers.append((event, handler))
+
+        bus = _Bus()
+        agent = OVOSAgentProtocol.__new__(OVOSAgentProtocol)
+        agent.bus = bus
+        agent.config = {
+            "catch_all_messages": "false",
+            "response_events": "speak, ovos.utterance.handled",
+        }
+
+        agent.register_bus_handlers()
+
+        assert not any(event == "message" for event, _ in bus.handlers)
+        assert any(
+            event == "speak"
+            and getattr(handler, "_hivemind_bus", None) is bus
+            for event, handler in bus.handlers
+        )
+        assert any(
+            event == "ovos.utterance.handled"
+            and getattr(handler, "_hivemind_bus", None) is bus
+            for event, handler in bus.handlers
+        )
+
     def test_bus_field_is_kept(self, agent, fake_bus):
         """The bus the plugin operates on is the one we wired in."""
         assert agent.bus is fake_bus
@@ -220,6 +270,61 @@ class TestBusRegistration:
         assert "ws://stale" not in agent._client_bus
         assert old_bus.closed is True
         assert any(event == "message" for event, _ in new_bus.handlers)
+
+    def test_replaced_bus_uses_direct_response_events_when_configured(self):
+        class _Event:
+            def __init__(self, connected):
+                self.connected = connected
+
+            def is_set(self):
+                return self.connected
+
+            def wait(self, _timeout):
+                return self.connected
+
+        class _Bus:
+            def __init__(self, connected, name):
+                self.connected_event = _Event(connected)
+                self.client = type(
+                    "Client",
+                    (),
+                    {"sock": type("Sock", (), {"connected": connected})()},
+                )()
+                self.name = name
+                self.closed = False
+                self.handlers = []
+
+            def on(self, event, handler):
+                self.handlers.append((event, handler))
+
+            def close(self):
+                self.closed = True
+
+        old_bus = _Bus(False, "old")
+        new_bus = _Bus(True, "new")
+        agent = OVOSAgentProtocol.__new__(OVOSAgentProtocol)
+        agent.bus = old_bus
+        agent.config = {
+            "bus_reconnect_timeout": 0.01,
+            "catch_all_responses": False,
+            "response_events": ["speak"],
+        }
+        agent._bus_pool = [old_bus]
+        agent._bus_endpoints = [("ovos-bus", 8181)]
+        agent._bus_cycle = plugin_module.itertools.cycle(agent._bus_pool)
+        agent._bus_cycle_lock = plugin_module.threading.Lock()
+        agent._bus_reconnect_locks = [plugin_module.threading.Lock()]
+        agent._client_bus = {}
+        agent._client_send_locks = {}
+        agent._bus_emit_locks = {}
+        agent._client_state_lock = plugin_module.threading.RLock()
+        agent._connect_messagebus = lambda host, port: new_bus
+
+        selected = agent.get_bus()
+
+        assert selected is new_bus
+        assert not any(event == "message" for event, _ in new_bus.handlers)
+        assert any(event == "speak" for event, _ in new_bus.handlers)
 
     def test_resolve_hosts_expands_dns_addresses(self, monkeypatch):
         created = []

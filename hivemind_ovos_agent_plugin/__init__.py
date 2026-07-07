@@ -25,6 +25,15 @@ from hivemind_ovos_agent_plugin.policy import (AddBlacklistedIntent,
 from hivemind_ovos_agent_plugin.version import __version__
 
 
+DEFAULT_RESPONSE_EVENTS = (
+    "speak",
+    "ovos.utterance.speak",
+    "ovos.utterance.handled",
+    "complete_intent_failure",
+    "hive.client.send.error",
+)
+
+
 @dataclasses.dataclass()
 class OVOSAgentProtocol(AgentProtocol):
     """HiveMind agent protocol that bridges client messages to an OVOS bus."""
@@ -180,6 +189,33 @@ class OVOSAgentProtocol(AgentProtocol):
             timeout = 10.0
         return max(0.0, timeout)
 
+    def _configured_catch_all_responses(self) -> bool:
+        raw = self.config.get(
+            "catch_all_responses",
+            self.config.get("catch_all_messages", True),
+        )
+        if isinstance(raw, str):
+            return raw.strip().lower() not in {"0", "false", "no", "off"}
+        return bool(raw)
+
+    def _configured_response_events(self) -> tuple[str, ...]:
+        raw = (
+            self.config.get("response_events")
+            or self.config.get("downstream_response_events")
+            or DEFAULT_RESPONSE_EVENTS
+        )
+        if isinstance(raw, str):
+            raw = [item.strip() for item in raw.split(",")]
+        if not isinstance(raw, (list, tuple, set)):
+            raw = DEFAULT_RESPONSE_EVENTS
+
+        events: list[str] = []
+        for event in raw:
+            event = str(event).strip()
+            if event and event not in events:
+                events.append(event)
+        return tuple(events or DEFAULT_RESPONSE_EVENTS)
+
     def _inflight_gate(self) -> tuple[threading.BoundedSemaphore, float]:
         semaphore = getattr(self, "_inflight_semaphore", None)
         if semaphore is None:
@@ -232,7 +268,11 @@ class OVOSAgentProtocol(AgentProtocol):
 
     def _register_bus_handlers(self, bus: MessageBusClient):
         bus.on("hive.send.downstream", self._bind_bus_handler(self.handle_send, bus))
-        bus.on("message", self._bind_bus_handler(self.handle_internal_mycroft, bus))  # catch all
+        if self._configured_catch_all_responses():
+            bus.on("message", self._bind_bus_handler(self.handle_internal_mycroft, bus))
+            return
+        for event in self._configured_response_events():
+            bus.on(event, self._bind_bus_handler(self.handle_internal_mycroft, bus))
 
     def _bind_bus_handler(self, callback, bus):
         """Bind a handler to its OVOS bus so pooled replies keep client affinity."""

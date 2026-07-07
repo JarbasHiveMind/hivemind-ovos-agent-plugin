@@ -20,7 +20,9 @@ client                hivemind-core                 OVOS bus
 ## Downstream A: skill replies / TTS / etc.
 
 OVOS skills typically emit responses with `context["destination"]` set to the original
-client peer. The plugin's catch-all `message` handler picks these up.
+client peer. The plugin's default catch-all `message` handler picks these up. High-load
+deployments can instead set `catch_all_responses=false` and list known
+`response_events`; the same destination filter still owns the final client routing.
 
 ```
 OVOS skill                  OVOSAgentProtocol             hivemind-core            client
