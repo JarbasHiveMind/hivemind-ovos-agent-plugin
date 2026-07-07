@@ -689,4 +689,14 @@ class OVOSAgentProtocol(AgentProtocol):
 OVOSProtocol = OVOSAgentProtocol
 
 
-__all__ = ["OVOSAgentProtocol", "OVOSProtocol", "__version__"]
+__all__ = [
+    "AddBlacklistedIntent",
+    "AddBlacklistedSkill",
+    "OVOSAgentPolicy",
+    "OVOSAgentProtocol",
+    "OVOSProtocol",
+    "RewriteUtterance",
+    "SetContextField",
+    "SetSessionField",
+    "__version__",
+]
