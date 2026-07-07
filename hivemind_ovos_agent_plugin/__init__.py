@@ -63,6 +63,8 @@ class OVOSAgentProtocol(AgentProtocol):
         self._client_bus = {}
         self._client_send_locks = {}
         self._bus_emit_locks = {}
+        self._query_waiters = {}
+        self._query_waiter_lock = threading.RLock()
         self._client_state_lock = threading.RLock()
         self._log_bus_pool_ready()
         self.register_bus_handlers()
@@ -268,6 +270,8 @@ class OVOSAgentProtocol(AgentProtocol):
 
     def _register_bus_handlers(self, bus: MessageBusClient):
         bus.on("hive.send.downstream", self._bind_bus_handler(self.handle_send, bus))
+        for event in ("speak", "ovos.utterance.handled", "complete_intent_failure"):
+            bus.on(event, self._bind_bus_handler(self._handle_query_response, bus))
         if self._configured_catch_all_responses():
             bus.on("message", self._bind_bus_handler(self.handle_internal_mycroft, bus))
             return
@@ -295,6 +299,15 @@ class OVOSAgentProtocol(AgentProtocol):
             self._client_send_locks = {}
         if not hasattr(self, "_bus_emit_locks"):
             self._bus_emit_locks = {}
+        return lock
+
+    def _query_lock(self):
+        lock = getattr(self, "_query_waiter_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            self._query_waiter_lock = lock
+        if not hasattr(self, "_query_waiters"):
+            self._query_waiters = {}
         return lock
 
     def _remember_client_bus(self, peer: str, bus: MessageBusClient):
@@ -521,6 +534,32 @@ class OVOSAgentProtocol(AgentProtocol):
             payload = json_dumps(message.__dict__)
         client.send(_maybe_encrypt(payload))
 
+    def _remember_query_waiter(self, query_id: str, queue):
+        with self._query_lock():
+            self._query_waiters[query_id] = queue
+
+    def _forget_query_waiter(self, query_id: str):
+        with self._query_lock():
+            self._query_waiters.pop(query_id, None)
+
+    def _handle_query_response(self, message: Message,
+                               bus: Optional[MessageBusClient] = None):
+        """Route query-scoped OVOS replies to their waiting API call directly."""
+        if isinstance(message, str):
+            message = Message.deserialize(message)
+        query_id = message.context.get("query_id")
+        if not query_id:
+            return
+        with self._query_lock():
+            waiter = self._query_waiters.get(query_id)
+        if waiter is None:
+            return
+
+        if message.msg_type == "speak":
+            waiter.put(message.data.get("utterance", ""))
+        elif message.msg_type in ("ovos.utterance.handled", "complete_intent_failure"):
+            waiter.put(None)
+
     def emit_client_message(self, message: Message, client=None) -> bool:
         """Inject a HiveMind client message into OVOS with bus affinity.
 
@@ -586,25 +625,8 @@ class OVOSAgentProtocol(AgentProtocol):
         q: "queue.Queue" = queue.Queue()
         response_timeout = self._configured_response_timeout()
 
-        def _on_speak(msg):
-            if isinstance(msg, str):
-                try:
-                    msg = Message.deserialize(msg)
-                except Exception:
-                    return
-            if msg.msg_type == "speak" and msg.context.get("query_id") == qid:
-                q.put(msg.data.get("utterance", ""))
-
-        def _on_done(msg):
-            if isinstance(msg, str):
-                try:
-                    msg = Message.deserialize(msg)
-                except Exception:
-                    return
-            if msg.context.get("query_id") == qid:
-                q.put(None)
-
         bus = None
+        self._remember_query_waiter(qid, q)
         try:
             message = Message(
                 "recognizer_loop:utterance",
@@ -614,19 +636,12 @@ class OVOSAgentProtocol(AgentProtocol):
             last_error = None
             for attempt in range(2):
                 bus = self.get_bus()
-                bus.on("speak", _on_speak)
-                bus.on("ovos.utterance.handled", _on_done)
                 try:
                     with self._emit_lock_for_bus(bus):
                         self._send_messagebus_checked(bus, message)
                     break
                 except Exception as exc:
                     last_error = exc
-                    try:
-                        bus.remove("speak", _on_speak)
-                        bus.remove("ovos.utterance.handled", _on_done)
-                    except Exception:
-                        pass
                     self._mark_bus_disconnected(
                         bus,
                         f"{type(exc).__name__} while sending query {qid}",
@@ -656,12 +671,7 @@ class OVOSAgentProtocol(AgentProtocol):
                     return
                 yield chunk
         finally:
-            if bus is not None:
-                try:
-                    bus.remove("speak", _on_speak)
-                    bus.remove("ovos.utterance.handled", _on_done)
-                except Exception:
-                    pass
+            self._forget_query_waiter(qid)
             semaphore.release()
 
     # mycroft handlers - from master -> slave
