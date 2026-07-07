@@ -549,6 +549,10 @@ class OVOSAgentProtocol(AgentProtocol):
             message = Message.deserialize(message)
         query_id = message.context.get("query_id")
         if not query_id:
+            session = message.context.get("session")
+            if isinstance(session, dict):
+                query_id = session.get("session_id")
+        if not query_id:
             return
         with self._query_lock():
             waiter = self._query_waiters.get(query_id)

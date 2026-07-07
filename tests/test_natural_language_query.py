@@ -126,6 +126,19 @@ def test_query_dispatch_ignores_unregistered_query_id():
     agent._query_waiters["wanted"].put.assert_not_called()
 
 
+def test_query_dispatch_accepts_session_id_when_query_id_is_missing():
+    agent = OVOSAgentProtocol.__new__(OVOSAgentProtocol)
+    agent._client_state_lock = threading.RLock()
+    waiter = MagicMock()
+    agent._query_waiters = {"wanted": waiter}
+
+    agent._handle_query_response(
+        Message("speak", {"utterance": "ok"}, {"session": {"session_id": "wanted"}})
+    )
+
+    waiter.put.assert_called_once_with("ok")
+
+
 def test_emit_client_message_retries_when_selected_bus_closes_on_send():
     first = _QueryBus(fail_send=True)
     second = _QueryBus()
