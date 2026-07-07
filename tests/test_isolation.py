@@ -33,6 +33,23 @@ class TestClientIsolation:
         bob.send.assert_called_once()
         carol.send.assert_not_called()
 
+    def test_targeted_reply_uses_direct_peer_lookup(self, agent, make_client):
+        class DirectLookupClients(dict):
+            def items(self):
+                raise AssertionError("targeted replies should not scan every client")
+
+        alice = make_client("ws://alice")
+        bob = make_client("ws://bob")
+        agent.hm_protocol.clients = DirectLookupClients({
+            "ws://alice": alice,
+            "ws://bob": bob,
+        })
+
+        agent.handle_internal_mycroft(_ovos_internal("speak", destination="ws://alice"))
+
+        alice.send.assert_called_once()
+        bob.send.assert_not_called()
+
     def test_message_with_no_destination_is_dropped(self, agent, make_client):
         alice = make_client("ws://alice")
         bob = make_client("ws://bob")

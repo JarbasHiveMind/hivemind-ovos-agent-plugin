@@ -710,19 +710,25 @@ class OVOSAgentProtocol(AgentProtocol):
             target_peers = [target_peers]
 
         if target_peers:
-            for peer, client in list(self.clients.items()):
-                if peer in target_peers:
-                    if not self._peer_owns_bus(peer, bus):
-                        continue
-                    LOG.debug(f"{message.msg_type} - destination: {peer}")
-                    message.context["source"] = "hive"
-                    msg = HiveMessage(
-                        HiveMessageType.BUS,
-                        source_peer=peer,
-                        target_peers=target_peers,
-                        payload=message,
-                    )
-                    self._send_to_client(peer, client, msg)
+            routed_peers = []
+            for peer in target_peers:
+                if peer and peer not in routed_peers:
+                    routed_peers.append(peer)
+            for peer in routed_peers:
+                if not self._peer_owns_bus(peer, bus):
+                    continue
+                client = self.clients.get(peer)
+                if client is None:
+                    continue
+                LOG.debug(f"{message.msg_type} - destination: {peer}")
+                message.context["source"] = "hive"
+                msg = HiveMessage(
+                    HiveMessageType.BUS,
+                    source_peer=peer,
+                    target_peers=target_peers,
+                    payload=message,
+                )
+                self._send_to_client(peer, client, msg)
 
 
 # back-compat alias for the old class name shipped from ovos-bus-client
