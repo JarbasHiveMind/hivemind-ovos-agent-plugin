@@ -1,5 +1,7 @@
 import dataclasses
 import itertools
+import json
+import re
 import socket
 import threading
 from typing import Dict, Any, Iterator, Optional
@@ -33,6 +35,10 @@ DEFAULT_RESPONSE_EVENTS = (
     "hive.client.send.error",
 )
 
+QUERY_SPEAK_EVENTS = {"speak", "ovos.utterance.speak"}
+QUERY_DONE_EVENTS = {"ovos.utterance.handled", "complete_intent_failure"}
+QUERY_API_RESULT_EVENTS = {"query.api.result"}
+
 
 @dataclasses.dataclass()
 class OVOSAgentProtocol(AgentProtocol):
@@ -41,7 +47,8 @@ class OVOSAgentProtocol(AgentProtocol):
     config: Dict[str, Any] = dataclasses.field(default_factory=lambda: Configuration().get("websocket", {}))
 
     def __post_init__(self):
-        endpoints = self._configured_bus_endpoints()
+        self._bus_endpoint_sources = self._configured_bus_endpoint_sources()
+        endpoints = self._configured_bus_endpoints(self._bus_endpoint_sources)
         self._bus_endpoints = endpoints
         if not self.bus or isinstance(self.bus, FakeBus):
             host, port = endpoints[0]
@@ -76,12 +83,17 @@ class OVOSAgentProtocol(AgentProtocol):
             pool_size = 1
         return max(1, pool_size)
 
-    def _configured_bus_endpoints(self) -> list[tuple[str, int]]:
+    def _configured_bus_endpoint_sources(self) -> list[tuple[str, int]]:
         endpoints = self._configured_endpoint_list()
-        if not endpoints:
-            host = self.config.get("host") or "127.0.0.1"
-            port = self._configured_bus_port()
-            endpoints = self._resolve_bus_host(host, port)
+        if endpoints:
+            return endpoints
+        host = self.config.get("host") or "127.0.0.1"
+        return [(host, self._configured_bus_port())]
+
+    def _configured_bus_endpoints(self, sources: Optional[list[tuple[str, int]]] = None) -> list[tuple[str, int]]:
+        endpoints = self._resolve_bus_endpoint_sources(
+            sources or self._configured_bus_endpoint_sources()
+        )
 
         pool_size = max(self._configured_pool_size(), len(endpoints))
         return list(itertools.islice(itertools.cycle(endpoints), pool_size))
@@ -148,6 +160,20 @@ class OVOSAgentProtocol(AgentProtocol):
                 endpoints.append(endpoint)
         return endpoints or [(host, port)]
 
+    def _resolve_bus_endpoint_sources(
+        self,
+        sources: list[tuple[str, int]],
+    ) -> list[tuple[str, int]]:
+        seen: set[tuple[str, int]] = set()
+        endpoints: list[tuple[str, int]] = []
+        for host, port in sources:
+            for endpoint in self._resolve_bus_host(host, port):
+                if endpoint in seen:
+                    continue
+                seen.add(endpoint)
+                endpoints.append(endpoint)
+        return endpoints or sources
+
     def _configured_max_inflight(self, pool_size: Optional[int] = None) -> int:
         raw_limit = self.config.get("max_inflight", self.config.get("max_in_flight"))
         if raw_limit is not None:
@@ -191,6 +217,18 @@ class OVOSAgentProtocol(AgentProtocol):
             timeout = 10.0
         return max(0.0, timeout)
 
+    def _configured_query_done_grace(self) -> float:
+        raw = (
+            self.config.get("query_done_grace")
+            or self.config.get("query_completion_grace")
+            or self.config.get("completion_grace")
+        )
+        try:
+            timeout = float(raw if raw is not None else 0.75)
+        except (TypeError, ValueError):
+            timeout = 0.75
+        return max(0.0, timeout)
+
     def _configured_catch_all_responses(self) -> bool:
         raw = self.config.get(
             "catch_all_responses",
@@ -199,6 +237,150 @@ class OVOSAgentProtocol(AgentProtocol):
         if isinstance(raw, str):
             return raw.strip().lower() not in {"0", "false", "no", "off"}
         return bool(raw)
+
+    def _configured_complete_on_first_response(self) -> bool:
+        raw = self.config.get(
+            "complete_on_first_response",
+            self.config.get("query_complete_on_first_response", False),
+        )
+        if isinstance(raw, str):
+            return raw.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(raw)
+
+    def _configured_direct_query_timeout(self) -> float:
+        raw = (
+            self.config.get("direct_query_timeout")
+            or self.config.get("direct_query_response_timeout")
+        )
+        try:
+            timeout = float(raw if raw is not None else 1.5)
+        except (TypeError, ValueError):
+            timeout = 1.5
+        return max(0.0, timeout)
+
+    def _configured_direct_query_routes(self) -> list[dict[str, Any]]:
+        raw = (
+            self.config.get("direct_query_routes")
+            or self.config.get("query_fast_routes")
+            or []
+        )
+        if isinstance(raw, str) and raw.strip().startswith(("[", "{")):
+            try:
+                raw = json.loads(raw)
+            except (TypeError, ValueError) as exc:
+                LOG.warning(f"Ignoring invalid direct_query_routes JSON: {exc}")
+                raw = []
+        if isinstance(raw, dict):
+            raw = [raw]
+        if not isinstance(raw, list):
+            return []
+
+        flat_event = (
+            self.config.get("direct_query_event")
+            or self.config.get("query_fast_event")
+        )
+        flat_api_event = (
+            self.config.get("direct_query_api_event")
+            or self.config.get("query_fast_api_event")
+        )
+        flat_patterns = (
+            self.config.get("direct_query_patterns")
+            or self.config.get("query_fast_patterns")
+            or ".*"
+        )
+        flat_langs = (
+            self.config.get("direct_query_langs")
+            or self.config.get("query_fast_langs")
+            or []
+        )
+        if flat_event:
+            raw = [
+                *raw,
+                {
+                    "event": flat_event,
+                    "patterns": flat_patterns,
+                    "langs": flat_langs,
+                },
+            ]
+        if flat_api_event:
+            raw = [
+                *raw,
+                {
+                    "api_event": flat_api_event,
+                    "patterns": flat_patterns,
+                    "langs": flat_langs,
+                },
+            ]
+
+        routes: list[dict[str, Any]] = []
+        for item in raw:
+            if isinstance(item, str):
+                event = item
+                api_event = None
+                patterns = [".*"]
+                langs = []
+            elif isinstance(item, dict):
+                event = item.get("event") or item.get("message_type") or item.get("type")
+                api_event = (
+                    item.get("api_event")
+                    or item.get("api")
+                    or item.get("skill_api_event")
+                    or item.get("public_api_event")
+                )
+                patterns = item.get("patterns") or item.get("pattern") or item.get("utterances") or item.get("utterance")
+                langs = item.get("langs") or item.get("languages") or item.get("lang") or []
+            else:
+                continue
+            if isinstance(patterns, str):
+                patterns = [patterns]
+            if isinstance(langs, str):
+                langs = [langs]
+            if not (event or api_event) or not isinstance(patterns, list):
+                continue
+            routes.append({
+                "event": str(event) if event else "",
+                "api_event": str(api_event) if api_event else "",
+                "patterns": [str(pattern) for pattern in patterns if str(pattern).strip()],
+                "langs": [str(lang).lower() for lang in langs if str(lang).strip()],
+            })
+        return routes
+
+    def _direct_query_route_for(self, utterance: str, lang: str) -> Optional[dict[str, Any]]:
+        text = " ".join(str(utterance or "").split())
+        if not text:
+            return None
+        normalized_lang = str(lang or "").lower()
+        for route in self._configured_direct_query_routes():
+            route_langs = route.get("langs") or []
+            if route_langs and normalized_lang not in route_langs:
+                continue
+            for pattern in route.get("patterns") or []:
+                try:
+                    if re.search(pattern, text, re.IGNORECASE):
+                        return route
+                except re.error as exc:
+                    LOG.warning(
+                        "Ignoring invalid direct query route pattern "
+                        f"{pattern!r}: {exc}"
+                    )
+        return None
+
+    def _direct_query_event_for(self, utterance: str, lang: str) -> Optional[str]:
+        route = self._direct_query_route_for(utterance, lang)
+        if not route:
+            return None
+        return route.get("event") or None
+
+    def _configured_direct_query_api_response_events(self) -> tuple[str, ...]:
+        events = []
+        for route in self._configured_direct_query_routes():
+            api_event = route.get("api_event")
+            if not api_event:
+                continue
+            response_event = f"{api_event}.response"
+            if response_event not in events:
+                events.append(response_event)
+        return tuple(events)
 
     def _configured_response_events(self) -> tuple[str, ...]:
         raw = (
@@ -270,7 +452,12 @@ class OVOSAgentProtocol(AgentProtocol):
 
     def _register_bus_handlers(self, bus: MessageBusClient):
         bus.on("hive.send.downstream", self._bind_bus_handler(self.handle_send, bus))
-        for event in ("speak", "ovos.utterance.handled", "complete_intent_failure"):
+        query_events = set(self._configured_response_events())
+        query_events.update(QUERY_SPEAK_EVENTS | QUERY_DONE_EVENTS)
+        query_events.update(self._configured_direct_query_api_response_events())
+        for event in sorted(query_events & (QUERY_SPEAK_EVENTS | QUERY_DONE_EVENTS)):
+            bus.on(event, self._bind_bus_handler(self._handle_query_response, bus))
+        for event in self._configured_direct_query_api_response_events():
             bus.on(event, self._bind_bus_handler(self._handle_query_response, bus))
         if self._configured_catch_all_responses():
             bus.on("message", self._bind_bus_handler(self.handle_internal_mycroft, bus))
@@ -394,9 +581,13 @@ class OVOSAgentProtocol(AgentProtocol):
 
     def _bus_socket_is_connected(self, bus: MessageBusClient) -> bool:
         client = getattr(bus, "client", None)
+        if client is None:
+            return False
+        if getattr(client, "has_errored", False):
+            return False
         sock = getattr(client, "sock", None)
         if sock is None:
-            return True
+            return False
         return bool(getattr(sock, "connected", True))
 
     def _bus_is_connected(self, bus: MessageBusClient) -> bool:
@@ -466,10 +657,15 @@ class OVOSAgentProtocol(AgentProtocol):
             if current is not old_bus and self._bus_is_connected(current):
                 return current
 
-            endpoints = getattr(self, "_bus_endpoints", None) or [
-                getattr(bus, "_hivemind_ovos_endpoint", None)
-                for bus in self._bus_pool
-            ]
+            sources = getattr(self, "_bus_endpoint_sources", None)
+            if sources:
+                endpoints = self._configured_bus_endpoints(sources)
+                self._bus_endpoints = endpoints
+            else:
+                endpoints = getattr(self, "_bus_endpoints", None) or [
+                    getattr(bus, "_hivemind_ovos_endpoint", None)
+                    for bus in self._bus_pool
+                ]
             endpoint = endpoints[index] if index < len(endpoints) else None
             if not endpoint or endpoint[0] == "provided":
                 raise ConnectionError("OVOS messagebus endpoint is not reconnectable")
@@ -547,11 +743,7 @@ class OVOSAgentProtocol(AgentProtocol):
         """Route query-scoped OVOS replies to their waiting API call directly."""
         if isinstance(message, str):
             message = Message.deserialize(message)
-        query_id = message.context.get("query_id")
-        if not query_id:
-            session = message.context.get("session")
-            if isinstance(session, dict):
-                query_id = session.get("session_id")
+        query_id = self._query_id_from_message(message)
         if not query_id:
             return
         with self._query_lock():
@@ -559,10 +751,108 @@ class OVOSAgentProtocol(AgentProtocol):
         if waiter is None:
             return
 
-        if message.msg_type == "speak":
-            waiter.put(message.data.get("utterance", ""))
-        elif message.msg_type in ("ovos.utterance.handled", "complete_intent_failure"):
-            waiter.put(None)
+        if message.msg_type in QUERY_SPEAK_EVENTS:
+            waiter.put(("speak", message.data.get("utterance", "")))
+        elif message.msg_type in QUERY_DONE_EVENTS:
+            waiter.put(("done", message.msg_type))
+        elif message.msg_type in self._configured_direct_query_api_response_events():
+            result = message.data.get("result")
+            if result is None:
+                return
+            waiter.put(("speak", str(result)))
+
+    def _query_id_from_message(self, message: Message) -> Optional[str]:
+        context = message.context or {}
+        data = message.data or {}
+        for source in (context, data):
+            if not isinstance(source, dict):
+                continue
+            for key in ("query_id", "queryId", "request_id", "requestId"):
+                value = source.get(key)
+                if value:
+                    return str(value)
+
+        for key in ("session_id", "sessionId"):
+            value = context.get(key)
+            if value:
+                return str(value)
+
+        session = context.get("session")
+        if isinstance(session, str):
+            try:
+                session = json.loads(session)
+            except (TypeError, ValueError):
+                return session or None
+        if isinstance(session, dict):
+            for key in ("session_id", "sessionId", "id"):
+                value = session.get(key)
+                if value:
+                    return str(value)
+        else:
+            for key in ("session_id", "sessionId", "id"):
+                value = getattr(session, key, None)
+                if value:
+                    return str(value)
+            serialize = getattr(session, "serialize", None)
+            if callable(serialize):
+                try:
+                    serialized = serialize()
+                except Exception:
+                    serialized = None
+                if isinstance(serialized, dict):
+                    for key in ("session_id", "sessionId", "id"):
+                        value = serialized.get(key)
+                        if value:
+                            return str(value)
+        return None
+
+    def _build_query_message(self, msg_type: str, utterance: str, lang: str,
+                             query_id: str) -> Message:
+        return Message(
+            msg_type,
+            {"utterances": [utterance], "utterance": utterance, "lang": lang},
+            {"query_id": query_id, "lang": lang, "session": {"session_id": query_id}},
+        )
+
+    def _build_query_api_message(self, msg_type: str, utterance: str, lang: str,
+                                 query_id: str) -> Message:
+        return Message(
+            msg_type,
+            {"args": [utterance, lang], "kwargs": {}},
+            {"query_id": query_id, "lang": lang, "session": {"session_id": query_id}},
+        )
+
+    def _send_query_message(self, message: Message, query_id: str) -> bool:
+        last_error = None
+        for attempt in range(2):
+            bus = self.get_bus()
+            try:
+                with self._emit_lock_for_bus(bus):
+                    self._send_messagebus_checked(bus, message)
+                return True
+            except Exception as exc:
+                last_error = exc
+                self._mark_bus_disconnected(
+                    bus,
+                    f"{type(exc).__name__} while sending query {query_id}",
+                )
+                if attempt == 0:
+                    continue
+        LOG.warning(
+            "Could not send OVOS query "
+            f"for query_id={query_id}: {last_error!r}"
+        )
+        return False
+
+    def _next_query_item(self, q, timeout: float):
+        import queue
+        try:
+            item = q.get(timeout=timeout)
+        except queue.Empty:
+            return None
+        if not isinstance(item, tuple):
+            return ("done", item) if item is None else ("speak", item)
+        return item
 
     def emit_client_message(self, message: Message, client=None) -> bool:
         """Inject a HiveMind client message into OVOS with bus affinity.
@@ -628,52 +918,81 @@ class OVOSAgentProtocol(AgentProtocol):
         qid = uuid.uuid4().hex
         q: "queue.Queue" = queue.Queue()
         response_timeout = self._configured_response_timeout()
+        done_grace = self._configured_query_done_grace()
+        complete_on_first = self._configured_complete_on_first_response()
 
-        bus = None
         self._remember_query_waiter(qid, q)
         try:
-            message = Message(
-                "recognizer_loop:utterance",
-                {"utterances": [utterance], "lang": lang},
-                {"query_id": qid, "session": {"session_id": qid}},
-            )
-            last_error = None
-            for attempt in range(2):
-                bus = self.get_bus()
-                try:
-                    with self._emit_lock_for_bus(bus):
-                        self._send_messagebus_checked(bus, message)
-                    break
-                except Exception as exc:
-                    last_error = exc
-                    self._mark_bus_disconnected(
-                        bus,
-                        f"{type(exc).__name__} while sending query {qid}",
-                    )
-                    bus = None
-                    if attempt == 0:
-                        continue
-            else:
-                LOG.warning(
-                    "Could not send OVOS query "
-                    f"for query_id={qid}: {last_error!r}"
+            direct_route = self._direct_query_route_for(utterance, lang)
+            pending_done = False
+            answered = False
+
+            if direct_route:
+                api_event = direct_route.get("api_event")
+                direct_event = direct_route.get("event")
+                direct = (
+                    self._build_query_api_message(api_event, utterance, lang, qid)
+                    if api_event
+                    else self._build_query_message(direct_event, utterance, lang, qid)
                 )
+                if not self._send_query_message(direct, qid):
+                    yield None
+                    return
+                item = self._next_query_item(q, self._configured_direct_query_timeout())
+                if item is not None:
+                    kind, chunk = item
+                    if kind == "speak" and chunk:
+                        answered = True
+                        yield str(chunk)
+                        if complete_on_first:
+                            yield None
+                            return
+                    elif kind == "done":
+                        pending_done = True
+                if pending_done and not answered:
+                    pending_done = False
+
+            if not answered:
+                message = self._build_query_message(
+                    "recognizer_loop:utterance",
+                    utterance,
+                    lang,
+                    qid,
+                )
+                if not self._send_query_message(message, qid):
+                    yield None
+                    return
+            else:
                 yield None
                 return
+
             while True:
-                try:
-                    chunk = q.get(timeout=response_timeout)
-                except queue.Empty:
+                timeout = done_grace if pending_done else response_timeout
+                item = self._next_query_item(q, timeout)
+                if item is None:
+                    if pending_done:
+                        yield None
+                        return
                     LOG.warning(
                         "Timed out waiting for OVOS response "
                         f"for query_id={qid} after {response_timeout}s"
                     )
                     yield None
                     return
-                if chunk is None:
+                kind, chunk = item
+                if kind == "done":
+                    if answered:
+                        yield None
+                        return
+                    pending_done = True
+                    continue
+                if not chunk:
+                    continue
+                answered = True
+                yield str(chunk)
+                if complete_on_first:
                     yield None
                     return
-                yield chunk
         finally:
             self._forget_query_waiter(qid)
             semaphore.release()

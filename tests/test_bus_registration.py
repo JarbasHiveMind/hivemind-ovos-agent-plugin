@@ -48,6 +48,31 @@ class TestBusRegistration:
             for listener in fake_bus.ee.listeners("custom.reply")
         )
 
+    def test_registers_direct_query_api_response_events(self):
+        class _Bus:
+            def __init__(self):
+                self.handlers = []
+
+            def on(self, event, handler):
+                self.handlers.append((event, handler))
+
+        bus = _Bus()
+        agent = OVOSAgentProtocol.__new__(OVOSAgentProtocol)
+        agent.bus = bus
+        agent.config = {
+            "catch_all_responses": False,
+            "direct_query_api_event": "thalovant-skill-date-time.thalovant.preview_reply",
+        }
+
+        agent.register_bus_handlers()
+
+        assert any(
+            event == "thalovant-skill-date-time.thalovant.preview_reply.response"
+            and getattr(handler, "__name__", "") == "_handle_query_response"
+            and getattr(handler, "_hivemind_bus", None) is bus
+            for event, handler in bus.handlers
+        )
+
     def test_direct_response_events_keep_pool_affinity(self):
         class _Bus:
             def __init__(self):
@@ -95,6 +120,14 @@ class TestBusRegistration:
                 self.port = port
                 self.emitter = emitter
                 self.connected_event = _ConnectedEvent()
+                self.client = type(
+                    "Client",
+                    (),
+                    {
+                        "has_errored": False,
+                        "sock": type("Sock", (), {"connected": True})(),
+                    },
+                )()
                 self.handlers = []
                 created.append(self)
 
@@ -145,6 +178,14 @@ class TestBusRegistration:
                 self.port = port
                 self.emitter = emitter
                 self.connected_event = _ConnectedEvent()
+                self.client = type(
+                    "Client",
+                    (),
+                    {
+                        "has_errored": False,
+                        "sock": type("Sock", (), {"connected": True})(),
+                    },
+                )()
                 self.handlers = []
                 created.append(self)
 
@@ -271,6 +312,119 @@ class TestBusRegistration:
         assert old_bus.closed is True
         assert any(event == "message" for event, _ in new_bus.handlers)
 
+    def test_replaced_bus_refreshes_resolved_endpoint(self):
+        class _Event:
+            def __init__(self, connected):
+                self.connected = connected
+
+            def is_set(self):
+                return self.connected
+
+        class _Bus:
+            def __init__(self, connected, name):
+                self.connected_event = _Event(connected)
+                self.client = type(
+                    "Client",
+                    (),
+                    {"sock": type("Sock", (), {"connected": connected})()},
+                )()
+                self.name = name
+                self.closed = False
+                self.handlers = []
+
+            def on(self, event, handler):
+                self.handlers.append((event, handler))
+
+            def close(self):
+                self.closed = True
+
+        old_bus = _Bus(False, "old")
+        new_bus = _Bus(True, "new")
+        connected = []
+        agent = OVOSAgentProtocol.__new__(OVOSAgentProtocol)
+        agent.bus = old_bus
+        agent.config = {
+            "host": "ovos-headless",
+            "port": 8181,
+            "pool_size": 1,
+            "resolve_hosts": True,
+            "bus_reconnect_timeout": 0.01,
+        }
+        agent._bus_pool = [old_bus]
+        agent._bus_endpoint_sources = [("ovos-headless", 8181)]
+        agent._bus_endpoints = [("10.42.1.10", 8181)]
+        agent._bus_cycle = plugin_module.itertools.cycle(agent._bus_pool)
+        agent._bus_cycle_lock = plugin_module.threading.Lock()
+        agent._bus_reconnect_locks = [plugin_module.threading.Lock()]
+        agent._client_bus = {}
+        agent._client_send_locks = {}
+        agent._bus_emit_locks = {}
+        agent._client_state_lock = plugin_module.threading.RLock()
+        agent._resolve_bus_host = lambda host, port: [("10.42.9.99", port)]
+
+        def _connect(host, port):
+            connected.append((host, port))
+            return new_bus
+
+        agent._connect_messagebus = _connect
+
+        selected = agent.get_bus()
+
+        assert selected is new_bus
+        assert connected == [("10.42.9.99", 8181)]
+        assert agent._bus_endpoints == [("10.42.9.99", 8181)]
+        assert old_bus.closed is True
+
+    def test_websocket_error_states_are_disconnected(self):
+        class _Event:
+            def is_set(self):
+                return True
+
+        agent = OVOSAgentProtocol.__new__(OVOSAgentProtocol)
+
+        errored = type(
+            "Bus",
+            (),
+            {
+                "connected_event": _Event(),
+                "client": type(
+                    "Client",
+                    (),
+                    {
+                        "has_errored": True,
+                        "sock": type("Sock", (), {"connected": True})(),
+                    },
+                )(),
+            },
+        )()
+        missing_sock = type(
+            "Bus",
+            (),
+            {
+                "connected_event": _Event(),
+                "client": type("Client", (), {"has_errored": False, "sock": None})(),
+            },
+        )()
+        closed_sock = type(
+            "Bus",
+            (),
+            {
+                "connected_event": _Event(),
+                "client": type(
+                    "Client",
+                    (),
+                    {
+                        "has_errored": False,
+                        "sock": type("Sock", (), {"connected": False})(),
+                    },
+                )(),
+            },
+        )()
+
+        assert agent._bus_is_connected(errored) is False
+        assert agent._bus_is_connected(missing_sock) is False
+        assert agent._bus_is_connected(closed_sock) is False
+
     def test_replaced_bus_uses_direct_response_events_when_configured(self):
         class _Event:
             def __init__(self, connected):
@@ -396,6 +550,9 @@ class TestBusRegistration:
                 return True
 
         class _Client:
+            has_errored = False
+            sock = type("Sock", (), {"connected": True})()
+
             def send(self, payload):
                 sent.append(payload)
 
@@ -427,6 +584,14 @@ class TestBusRegistration:
         class _Bus:
             def __init__(self):
                 self.messages = []
+                self.client = type(
+                    "Client",
+                    (),
+                    {
+                        "has_errored": False,
+                        "sock": type("Sock", (), {"connected": True})(),
+                    },
+                )()
 
             def emit_checked(self, message):
                 self.messages.append(message)
@@ -452,6 +617,9 @@ class TestBusRegistration:
                 return True
 
         class _Client:
+            has_errored = False
+            sock = type("Sock", (), {"connected": True})()
+
             def send(self, _payload):
                 raise RuntimeError("socket closed")
 
