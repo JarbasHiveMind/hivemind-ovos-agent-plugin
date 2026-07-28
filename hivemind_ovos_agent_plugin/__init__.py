@@ -102,6 +102,8 @@ class OVOSAgentProtocol(AgentProtocol):
                 # Ignore malformed third-party bus payloads.
                 except Exception:  # noqa: BLE001
                     return
+            if not isinstance(msg, Message):
+                return
             if msg.msg_type == "speak" and msg.context.get("query_id") == qid:
                 q.put(msg.data.get("utterance", ""))
 
@@ -112,6 +114,8 @@ class OVOSAgentProtocol(AgentProtocol):
                 # Ignore malformed third-party bus payloads.
                 except Exception:  # noqa: BLE001
                     return
+            if not isinstance(msg, Message):
+                return
             if msg.context.get("query_id") == qid:
                 q.put(None)
 
