@@ -104,6 +104,25 @@ class TestBusRegistration:
         assert agent.bus is replacement
         assert agent._reconnect_blocked_until > 0
 
+    def test_reconnect_wait_does_not_hold_state_lock(self, agent):
+        failed_bus = MagicMock()
+        failed_bus.emit_checked.side_effect = RuntimeError("socket closed")
+        replacement = MagicMock()
+        agent.bus = agent._owned_bus = failed_bus
+        agent._bus_endpoint = ("127.0.0.1", 8181)
+        agent.register_bus_handlers = MagicMock()
+
+        def connect_without_state_lock(host, port):
+            assert agent._bus_state_lock.acquire(blocking=False)
+            agent._bus_state_lock.release()
+            return replacement
+
+        agent._connect_messagebus = MagicMock(
+            side_effect=connect_without_state_lock
+        )
+
+        assert agent.emit_client_message(Message("speak")) is True
+
     def test_failed_reconnect_enters_cooldown(self, agent):
         failed_bus = MagicMock()
         failed_bus.emit_checked.side_effect = RuntimeError("socket closed")
