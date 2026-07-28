@@ -36,6 +36,7 @@ def agent(fake_bus):
     plugin.config = {}
     plugin._bus_state_lock = threading.Lock()
     plugin._bus_reconnect_lock = threading.Lock()
+    plugin._bus_write_locks = {}
     plugin._owned_bus = None
     plugin._bus_endpoint = None
     plugin._reconnect_blocked_until = 0.0

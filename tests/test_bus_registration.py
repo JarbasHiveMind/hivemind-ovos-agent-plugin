@@ -1,5 +1,6 @@
 """Verify the plugin registers the expected handlers on the OVOS bus."""
 
+import threading
 from unittest.mock import MagicMock
 
 from hivemind_ovos_agent_plugin import OVOSAgentProtocol
@@ -122,6 +123,50 @@ class TestBusRegistration:
         )
 
         assert agent.emit_client_message(Message("speak")) is True
+
+    def test_bus_retirement_waits_for_inflight_write(self, agent):
+        send_started = threading.Event()
+        release_send = threading.Event()
+        retirement_started = threading.Event()
+        bus_closed = threading.Event()
+        failed_bus = MagicMock()
+        replacement = MagicMock()
+
+        def blocking_send(message):
+            send_started.set()
+            assert release_send.wait(2)
+
+        failed_bus.emit_checked.side_effect = blocking_send
+        failed_bus.remove.side_effect = (
+            lambda *args: retirement_started.set()
+        )
+        failed_bus.close.side_effect = bus_closed.set
+        agent.bus = agent._owned_bus = failed_bus
+        agent._bus_endpoint = ("127.0.0.1", 8181)
+        agent._connect_messagebus = MagicMock(return_value=replacement)
+        agent.register_bus_handlers = MagicMock()
+
+        sender = threading.Thread(
+            target=agent.emit_client_message,
+            args=(Message("speak"),),
+        )
+        replacer = threading.Thread(
+            target=agent._replace_owned_bus,
+            args=(failed_bus,),
+        )
+        sender.start()
+        assert send_started.wait(1)
+        replacer.start()
+        assert retirement_started.wait(1)
+        assert not bus_closed.is_set()
+
+        release_send.set()
+        sender.join(2)
+        replacer.join(2)
+
+        assert not sender.is_alive()
+        assert not replacer.is_alive()
+        assert bus_closed.is_set()
 
     def test_failed_reconnect_enters_cooldown(self, agent):
         failed_bus = MagicMock()

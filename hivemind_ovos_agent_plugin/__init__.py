@@ -2,7 +2,7 @@ import dataclasses
 import threading
 import time
 from collections.abc import Iterator
-from typing import Any, Optional
+from typing import Any
 
 from ovos_bus_client import MessageBusClient
 from ovos_bus_client.message import Message
@@ -44,11 +44,14 @@ class OVOSAgentProtocol(AgentProtocol):
     _bus_reconnect_lock: threading.Lock = dataclasses.field(
         default_factory=threading.Lock, init=False, repr=False, compare=False
     )
-    _owned_bus: Optional[MessageBusClient] = dataclasses.field(
+    _owned_bus: MessageBusClient | None = dataclasses.field(
         default=None, init=False, repr=False, compare=False
     )
-    _bus_endpoint: Optional[tuple[str, int]] = dataclasses.field(
+    _bus_endpoint: tuple[str, int] | None = dataclasses.field(
         default=None, init=False, repr=False, compare=False
+    )
+    _bus_write_locks: dict[int, threading.Lock] = dataclasses.field(
+        default_factory=dict, init=False, repr=False, compare=False
     )
     _reconnect_blocked_until: float = dataclasses.field(
         default=0.0, init=False, repr=False, compare=False
@@ -87,7 +90,7 @@ class OVOSAgentProtocol(AgentProtocol):
             )
         return bus
 
-    def register_bus_handlers(self, bus: Optional[MessageBusClient] = None):
+    def register_bus_handlers(self, bus: MessageBusClient | None = None):
         LOG.debug("registering internal OVOS bus handlers")
         bus = bus or self.bus
         bus.on("hive.send.downstream", self.handle_send)
@@ -100,6 +103,27 @@ class OVOSAgentProtocol(AgentProtocol):
             bus.remove("message", self.handle_internal_mycroft)
         except Exception as error:
             LOG.debug(f"Failed to detach stale OVOS bus handlers: {error!r}")
+
+    def _bus_write_lock(self, bus: MessageBusClient) -> threading.Lock:
+        """Return the lock coordinating writes and retirement for one bus."""
+        key = id(bus)
+        with self._bus_state_lock:
+            lock = self._bus_write_locks.get(key)
+            if lock is None:
+                lock = threading.Lock()
+                self._bus_write_locks[key] = lock
+            return lock
+
+    def _close_bus(self, bus: MessageBusClient, reason: str) -> None:
+        """Close a bus only after its in-flight write has completed."""
+        lock = self._bus_write_lock(bus)
+        with lock:
+            try:
+                bus.close()
+            except Exception as error:
+                LOG.debug(f"Failed to close {reason} OVOS bus: {error!r}")
+        with self._bus_state_lock:
+            self._bus_write_locks.pop(id(bus), None)
 
     def _delivery_timeout(self) -> float:
         raw = self.config.get("delivery_timeout", 10)
@@ -186,19 +210,11 @@ class OVOSAgentProtocol(AgentProtocol):
 
             if active_bus is not None:
                 self._unregister_bus_handlers(failed_bus)
-                try:
-                    failed_bus.close()
-                except Exception as error:
-                    LOG.debug(
-                        f"Failed to close superseded OVOS bus: {error!r}"
-                    )
+                self._close_bus(failed_bus, "superseded")
                 return active_bus
 
-            try:
-                self._unregister_bus_handlers(failed_bus)
-                failed_bus.close()
-            except Exception as error:
-                LOG.debug(f"Failed to close disconnected OVOS bus: {error!r}")
+            self._unregister_bus_handlers(failed_bus)
+            self._close_bus(failed_bus, "disconnected")
 
             host, port = endpoint
             LOG.warning(f"Reconnecting OVOS messagebus at ws://{host}:{port}")
@@ -215,11 +231,7 @@ class OVOSAgentProtocol(AgentProtocol):
             try:
                 self.register_bus_handlers(replacement)
             except Exception:
-                try:
-                    replacement.close()
-                except Exception as error:
-                    LOG.debug("Failed to close unregistered OVOS bus: "
-                              f"{error!r}")
+                self._close_bus(replacement, "unregistered")
                 with self._bus_state_lock:
                     if failed_bus is self._owned_bus:
                         self._reconnect_blocked_until = (
@@ -241,10 +253,7 @@ class OVOSAgentProtocol(AgentProtocol):
                     self._owned_bus = None
 
             self._unregister_bus_handlers(replacement)
-            try:
-                replacement.close()
-            except Exception as error:
-                LOG.debug(f"Failed to close unused OVOS bus: {error!r}")
+            self._close_bus(replacement, "unused")
             return active_bus
 
     def emit_client_message(self, message: Message, client=None) -> bool:
@@ -267,7 +276,8 @@ class OVOSAgentProtocol(AgentProtocol):
             )
 
         try:
-            self._send_messagebus_checked(bus, message)
+            with self._bus_write_lock(bus):
+                self._send_messagebus_checked(bus, message)
         except Exception as delivery_error:
             if not owned_at_send:
                 raise
@@ -277,7 +287,8 @@ class OVOSAgentProtocol(AgentProtocol):
             )
             bus = self._replace_owned_bus(bus)
             try:
-                self._send_messagebus_checked(bus, message)
+                with self._bus_write_lock(bus):
+                    self._send_messagebus_checked(bus, message)
             except Exception:
                 close_owned_bus = False
                 with self._bus_state_lock:
@@ -287,17 +298,13 @@ class OVOSAgentProtocol(AgentProtocol):
                         )
                         close_owned_bus = True
                 if close_owned_bus:
-                    try:
-                        bus.close()
-                    except Exception as error:
-                        LOG.debug("Failed to close replacement OVOS bus: "
-                                  f"{error!r}")
+                    self._close_bus(bus, "replacement")
                 raise
         return True
 
 
     def natural_language_query(self, utterance: str,
-                               lang: str) -> Iterator[Optional[str]]:
+                               lang: str) -> Iterator[str | None]:
         """Answer by injecting the utterance on the OVOS bus and streaming the
         ``speak`` replies until ``ovos.utterance.handled`` (or 10s inactivity),
         correlated by a fresh query-scoped session so they are not reverse-routed."""
