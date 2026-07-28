@@ -3,7 +3,6 @@ import threading
 from typing import Dict, Any, Iterator, Optional
 
 from ovos_bus_client import MessageBusClient
-from ovos_bus_client.client.client import _maybe_encrypt
 from ovos_bus_client.message import Message
 from ovos_bus_client.session import Session, SessionManager
 from ovos_config import Configuration
@@ -110,7 +109,16 @@ class OVOSAgentProtocol(AgentProtocol):
             message.context["session"] = session.serialize()
 
         payload = message.serialize()
-        client.send(_maybe_encrypt(payload))
+        try:
+            # Encryption support was added after ovos-bus-client 1.x. Use
+            # the same serializer when present, while remaining importable
+            # with supported releases that send the serialized message.
+            from ovos_bus_client.client.client import _maybe_encrypt
+        except ImportError:
+            pass
+        else:
+            payload = _maybe_encrypt(payload)
+        client.send(payload)
 
     def _replace_owned_bus(self, failed_bus: MessageBusClient
                            ) -> MessageBusClient:
