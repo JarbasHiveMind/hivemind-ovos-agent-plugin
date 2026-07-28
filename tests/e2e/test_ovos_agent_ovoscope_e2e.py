@@ -15,7 +15,7 @@ _SKILL = "ovos-skill-hello-world.openvoiceos"
 
 
 def _has_skill():
-    return _SKILL in [e.name for e in entry_points(group="ovos.plugin.skill")]
+    return _SKILL in [e.name for e in entry_points(group="opm.skill")]
 
 
 @pytest.mark.skipif(not _has_skill(), reason="needs ovos-skill-hello-world")
