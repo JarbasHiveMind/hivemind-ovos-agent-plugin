@@ -49,6 +49,7 @@ class TestBusRegistration:
         replacement = MagicMock()
         replacement.emit_checked = MagicMock()
         agent.bus = failed_bus
+        agent._owned_bus = failed_bus
         agent._bus_endpoint = ("127.0.0.1", 8181)
         agent._connect_messagebus = MagicMock(return_value=replacement)
         agent.register_bus_handlers = MagicMock()
@@ -56,11 +57,70 @@ class TestBusRegistration:
 
         assert agent.emit_client_message(message) is True
 
+        failed_bus.remove.assert_any_call(
+            "hive.send.downstream", agent.handle_send
+        )
+        failed_bus.remove.assert_any_call(
+            "message", agent.handle_internal_mycroft
+        )
         failed_bus.close.assert_called_once_with()
         agent._connect_messagebus.assert_called_once_with("127.0.0.1", 8181)
         agent.register_bus_handlers.assert_called_once_with(replacement)
         replacement.emit_checked.assert_called_once_with(message)
         assert agent.bus is replacement
+
+    def test_reassigned_external_bus_is_not_replaced(self, agent):
+        owned_bus = MagicMock()
+        external_bus = MagicMock()
+        external_bus.emit_checked.side_effect = RuntimeError("socket closed")
+        agent._owned_bus = owned_bus
+        agent._bus_endpoint = ("127.0.0.1", 8181)
+        agent.bus = external_bus
+        agent._connect_messagebus = MagicMock()
+
+        with pytest.raises(RuntimeError, match="socket closed"):
+            agent.emit_client_message(Message("speak"))
+
+        external_bus.close.assert_not_called()
+        agent._connect_messagebus.assert_not_called()
+        assert agent.bus is external_bus
+
+    def test_replacement_failure_is_closed_and_propagated(self, agent):
+        failed_bus = MagicMock()
+        failed_bus.emit_checked.side_effect = RuntimeError("socket closed")
+        replacement = MagicMock()
+        replacement.emit_checked.side_effect = RuntimeError(
+            "replacement socket closed"
+        )
+        agent.bus = agent._owned_bus = failed_bus
+        agent._bus_endpoint = ("127.0.0.1", 8181)
+        agent._connect_messagebus = MagicMock(return_value=replacement)
+        agent.register_bus_handlers = MagicMock()
+
+        with pytest.raises(RuntimeError, match="replacement socket closed"):
+            agent.emit_client_message(Message("speak"))
+
+        replacement.close.assert_called_once_with()
+        assert agent.bus is replacement
+        assert agent._reconnect_blocked_until > 0
+
+    def test_failed_reconnect_enters_cooldown(self, agent):
+        failed_bus = MagicMock()
+        failed_bus.emit_checked.side_effect = RuntimeError("socket closed")
+        agent.bus = agent._owned_bus = failed_bus
+        agent._bus_endpoint = ("127.0.0.1", 8181)
+        agent.config["reconnect_cooldown"] = 30
+        agent._connect_messagebus = MagicMock(
+            side_effect=ConnectionError("OVOS bus unavailable")
+        )
+
+        with pytest.raises(ConnectionError, match="OVOS bus unavailable"):
+            agent.emit_client_message(Message("speak"))
+        with pytest.raises(ConnectionError, match="cooldown"):
+            agent.emit_client_message(Message("speak"))
+
+        agent._connect_messagebus.assert_called_once_with("127.0.0.1", 8181)
+        failed_bus.emit_checked.assert_called_once()
 
     def test_raw_websocket_fallback_propagates_send_error(self, agent):
         bus = MagicMock(spec=[])

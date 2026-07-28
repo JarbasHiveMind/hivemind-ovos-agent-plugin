@@ -1,6 +1,8 @@
 import dataclasses
 import threading
-from typing import Dict, Any, Iterator, Optional
+import time
+from collections.abc import Iterator
+from typing import Any, Optional
 
 from ovos_bus_client import MessageBusClient
 from ovos_bus_client.message import Message
@@ -21,22 +23,42 @@ from hivemind_ovos_agent_plugin.policy import (AddBlacklistedIntent,
                                                 SetSessionField)
 from hivemind_ovos_agent_plugin.version import __version__
 
+try:
+    # This helper is not present in every supported ovos-bus-client release.
+    # Cache it once so the compatibility path does not import per message.
+    from ovos_bus_client.client.client import _maybe_encrypt as _encrypt_bus_payload
+except ImportError:
+    _encrypt_bus_payload = None
+
 
 @dataclasses.dataclass()
 class OVOSAgentProtocol(AgentProtocol):
     """HiveMind agent protocol that bridges client messages to an OVOS bus."""
     bus: MessageBusClient = dataclasses.field(default_factory=FakeBus)
-    config: Dict[str, Any] = dataclasses.field(default_factory=lambda: Configuration().get("websocket", {}))
+    config: dict[str, Any] = dataclasses.field(
+        default_factory=lambda: Configuration().get("websocket", {})
+    )
+    _bus_state_lock: threading.RLock = dataclasses.field(
+        default_factory=threading.RLock, init=False, repr=False, compare=False
+    )
+    _owned_bus: Optional[MessageBusClient] = dataclasses.field(
+        default=None, init=False, repr=False, compare=False
+    )
+    _bus_endpoint: Optional[tuple[str, int]] = dataclasses.field(
+        default=None, init=False, repr=False, compare=False
+    )
+    _reconnect_blocked_until: float = dataclasses.field(
+        default=0.0, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self):
-        self._bus_emit_lock = threading.RLock()
-        self._bus_endpoint = None
         if not self.bus or isinstance(self.bus, FakeBus):
             ovos_bus_address = self.config.get("host") or "127.0.0.1"
             ovos_bus_port = self.config.get("port") or 8181
             self._bus_endpoint = (ovos_bus_address, ovos_bus_port)
             self.bus = self._connect_messagebus(ovos_bus_address,
                                                 ovos_bus_port)
+            self._owned_bus = self.bus
         self.register_bus_handlers()
 
     def _connect_messagebus(self, host: str, port: int) -> MessageBusClient:
@@ -68,12 +90,13 @@ class OVOSAgentProtocol(AgentProtocol):
         bus.on("hive.send.downstream", self.handle_send)
         bus.on("message", self.handle_internal_mycroft)  # catch all
 
-    def _delivery_lock(self):
-        lock = getattr(self, "_bus_emit_lock", None)
-        if lock is None:
-            lock = threading.RLock()
-            self._bus_emit_lock = lock
-        return lock
+    def _unregister_bus_handlers(self, bus: MessageBusClient) -> None:
+        """Detach this agent before retiring a stale bus connection."""
+        try:
+            bus.remove("hive.send.downstream", self.handle_send)
+            bus.remove("message", self.handle_internal_mycroft)
+        except Exception as error:
+            LOG.debug(f"Failed to detach stale OVOS bus handlers: {error!r}")
 
     def _delivery_timeout(self) -> float:
         raw = self.config.get("delivery_timeout", 10)
@@ -81,6 +104,13 @@ class OVOSAgentProtocol(AgentProtocol):
             return max(0.0, float(raw))
         except (TypeError, ValueError):
             return 10.0
+
+    def _reconnect_cooldown(self) -> float:
+        raw = self.config.get("reconnect_cooldown", 5)
+        try:
+            return max(0.0, float(raw))
+        except (TypeError, ValueError):
+            return 5.0
 
     def _send_messagebus_checked(self, bus: MessageBusClient,
                                  message: Message) -> None:
@@ -109,36 +139,72 @@ class OVOSAgentProtocol(AgentProtocol):
             message.context["session"] = session.serialize()
 
         payload = message.serialize()
-        try:
-            # Encryption support was added after ovos-bus-client 1.x. Use
-            # the same serializer when present, while remaining importable
-            # with supported releases that send the serialized message.
-            from ovos_bus_client.client.client import _maybe_encrypt
-        except ImportError:
-            pass
-        else:
-            payload = _maybe_encrypt(payload)
+        if _encrypt_bus_payload is not None:
+            payload = _encrypt_bus_payload(payload)
         client.send(payload)
 
     def _replace_owned_bus(self, failed_bus: MessageBusClient
                            ) -> MessageBusClient:
-        endpoint = getattr(self, "_bus_endpoint", None)
-        if endpoint is None:
-            raise ConnectionError(
-                "Externally supplied OVOS messagebus cannot be replaced"
-            )
+        """Replace the exact bus created by this plugin.
 
-        try:
-            failed_bus.close()
-        except Exception as error:
-            LOG.debug(f"Failed to close disconnected OVOS bus: {error!r}")
+        The state lock serializes ownership changes only; message writes stay
+        outside it so one blocked socket cannot stall unrelated senders.
+        """
+        with self._bus_state_lock:
+            if failed_bus is not self._owned_bus:
+                # Another sender already replaced this formerly-owned bus.
+                if self._owned_bus is not None and self.bus is self._owned_bus:
+                    return self._owned_bus
+                raise ConnectionError(
+                    "Externally supplied OVOS messagebus cannot be replaced"
+                )
 
-        host, port = endpoint
-        LOG.warning(f"Reconnecting OVOS messagebus at ws://{host}:{port}")
-        replacement = self._connect_messagebus(host, port)
-        self.register_bus_handlers(replacement)
-        self.bus = replacement
-        return replacement
+            if self.bus is not failed_bus:
+                # The application reassigned the active bus while this send
+                # was in flight. Retire only the plugin-owned stale bus and
+                # preserve the caller-supplied replacement.
+                self._owned_bus = None
+                self._unregister_bus_handlers(failed_bus)
+                try:
+                    failed_bus.close()
+                except Exception as error:
+                    LOG.debug(
+                        f"Failed to close superseded OVOS bus: {error!r}"
+                    )
+                return self.bus
+
+            endpoint = self._bus_endpoint
+            if endpoint is None:
+                raise ConnectionError(
+                    "Externally supplied OVOS messagebus cannot be replaced"
+                )
+
+            now = time.monotonic()
+            if now < self._reconnect_blocked_until:
+                raise ConnectionError(
+                    "OVOS messagebus reconnect cooldown is active"
+                )
+
+            try:
+                self._unregister_bus_handlers(failed_bus)
+                failed_bus.close()
+            except Exception as error:
+                LOG.debug(f"Failed to close disconnected OVOS bus: {error!r}")
+
+            host, port = endpoint
+            LOG.warning(f"Reconnecting OVOS messagebus at ws://{host}:{port}")
+            try:
+                replacement = self._connect_messagebus(host, port)
+            except Exception:
+                self._reconnect_blocked_until = (
+                    time.monotonic() + self._reconnect_cooldown()
+                )
+                raise
+
+            self.register_bus_handlers(replacement)
+            self.bus = self._owned_bus = replacement
+            self._reconnect_blocked_until = 0.0
+            return replacement
 
     def emit_client_message(self, message: Message, client=None) -> bool:
         """Deliver an admitted HiveMind client message to the OVOS runtime.
@@ -147,32 +213,50 @@ class OVOSAgentProtocol(AgentProtocol):
         Core needs a truthful result, so use a checked write and replace the
         plugin-owned connection once before reporting failure.
         """
-        with self._delivery_lock():
-            bus = self.get_bus(client)
+        bus = self.get_bus(client)
+        with self._bus_state_lock:
+            owned_at_send = bus is self._owned_bus
+            reconnect_blocked = (
+                owned_at_send
+                and time.monotonic() < self._reconnect_blocked_until
+            )
+        if reconnect_blocked:
+            raise ConnectionError(
+                "OVOS messagebus reconnect cooldown is active"
+            )
+
+        try:
+            self._send_messagebus_checked(bus, message)
+        except Exception as delivery_error:
+            if not owned_at_send:
+                raise
+            LOG.warning(
+                "OVOS messagebus delivery failed with "
+                f"{type(delivery_error).__name__}; reconnecting once"
+            )
+            bus = self._replace_owned_bus(bus)
             try:
                 self._send_messagebus_checked(bus, message)
-            except Exception as delivery_error:
-                if getattr(self, "_bus_endpoint", None) is None:
-                    raise
-                LOG.warning(
-                    "OVOS messagebus delivery failed with "
-                    f"{type(delivery_error).__name__}; reconnecting once"
-                )
-                bus = self._replace_owned_bus(bus)
-                try:
-                    self._send_messagebus_checked(bus, message)
-                except Exception:
+            except Exception:
+                close_owned_bus = False
+                with self._bus_state_lock:
+                    if bus is self._owned_bus:
+                        self._reconnect_blocked_until = (
+                            time.monotonic() + self._reconnect_cooldown()
+                        )
+                        close_owned_bus = True
+                if close_owned_bus:
                     try:
                         bus.close()
                     except Exception as error:
                         LOG.debug("Failed to close replacement OVOS bus: "
                                   f"{error!r}")
-                    raise
+                raise
         return True
 
 
     def natural_language_query(self, utterance: str,
-                               lang: str) -> "Iterator[Optional[str]]":
+                               lang: str) -> Iterator[Optional[str]]:
         """Answer by injecting the utterance on the OVOS bus and streaming the
         ``speak`` replies until ``ovos.utterance.handled`` (or 10s inactivity),
         correlated by a fresh query-scoped session so they are not reverse-routed."""
