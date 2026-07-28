@@ -11,12 +11,14 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from hivemind_ovos_agent_plugin.policy import (AddBlacklistedIntent,
-                                                AddBlacklistedSkill,
-                                                OVOSAgentPolicy,
-                                                RewriteUtterance,
-                                                SetContextField,
-                                                SetSessionField)
+from hivemind_ovos_agent_plugin.policy import (
+    AddBlacklistedIntent,
+    AddBlacklistedSkill,
+    OVOSAgentPolicy,
+    RewriteUtterance,
+    SetContextField,
+    SetSessionField,
+)
 
 
 class _FakeMessage:

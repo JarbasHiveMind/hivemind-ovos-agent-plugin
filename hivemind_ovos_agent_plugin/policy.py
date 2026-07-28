@@ -17,18 +17,16 @@ Spec: https://github.com/JarbasHiveMind/HiveMind-core/issues/85
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
-from hivemind_plugin_manager import (DenyCodes, Mutation, PolicyPlugin,
-                                     Verdict)
+from hivemind_plugin_manager import DenyCodes, Mutation, PolicyPlugin, Verdict
 from ovos_utils.log import LOG
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _ensure_session(message) -> Dict[str, Any]:
+def _ensure_session(message) -> dict[str, Any]:
     """Return ``message.context["session"]``, creating it if missing.
 
     Robust to non-dict context/session values — the chain runner can
@@ -53,7 +51,7 @@ class AddBlacklistedSkill(Mutation):
     """Add a ``skill_id`` to ``message.context["session"]["blacklisted_skills"]``."""
     skill_id: str
 
-    def apply(self, message, client) -> Optional[Any]:
+    def apply(self, message, client) -> Any | None:
         bl = _ensure_session(message).setdefault("blacklisted_skills", [])
         if self.skill_id not in bl:
             bl.append(self.skill_id)
@@ -65,7 +63,7 @@ class AddBlacklistedIntent(Mutation):
     """Add an intent name to ``message.context["session"]["blacklisted_intents"]``."""
     intent_name: str
 
-    def apply(self, message, client) -> Optional[Any]:
+    def apply(self, message, client) -> Any | None:
         bl = _ensure_session(message).setdefault("blacklisted_intents", [])
         if self.intent_name not in bl:
             bl.append(self.intent_name)
@@ -78,7 +76,7 @@ class SetSessionField(Mutation):
     key: str
     value: Any
 
-    def apply(self, message, client) -> Optional[Any]:
+    def apply(self, message, client) -> Any | None:
         _ensure_session(message)[self.key] = self.value
         return None
 
@@ -90,10 +88,10 @@ class SetContextField(Mutation):
     ``path`` is a tuple of dict keys. Intermediate dicts are created if
     missing or replaced if they were non-dicts.
     """
-    path: Tuple[str, ...]
+    path: tuple[str, ...]
     value: Any
 
-    def apply(self, message, client) -> Optional[Any]:
+    def apply(self, message, client) -> Any | None:
         if not self.path:
             return None
         target = message.context
@@ -116,7 +114,7 @@ class RewriteUtterance(Mutation):
     Mycroft message. Silent no-op on any other ``msg_type``."""
     text: str
 
-    def apply(self, message, client) -> Optional[Any]:
+    def apply(self, message, client) -> Any | None:
         if getattr(message, "msg_type", None) != "recognizer_loop:utterance":
             return None
         if not isinstance(message.data, dict):
@@ -172,7 +170,9 @@ class OVOSAgentPolicy(PolicyPlugin):
 
         try:
             user = client.resolve_user(db)
-        except Exception as e:
+        # Policy is a fail-closed boundary: any database/backend error must
+        # become a denial instead of escaping or bypassing the policy.
+        except Exception as e:  # noqa: BLE001
             LOG.warning("OVOSAgentPolicy: client.resolve_user failed",
                         exc_info=True)
             return Verdict.deny(
@@ -193,10 +193,10 @@ class OVOSAgentPolicy(PolicyPlugin):
 
 
 __all__ = [
-    "AddBlacklistedSkill",
     "AddBlacklistedIntent",
-    "SetSessionField",
-    "SetContextField",
-    "RewriteUtterance",
+    "AddBlacklistedSkill",
     "OVOSAgentPolicy",
+    "RewriteUtterance",
+    "SetContextField",
+    "SetSessionField",
 ]

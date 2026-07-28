@@ -23,12 +23,10 @@ from __future__ import annotations
 
 import time
 
-import pytest
 from hivemind_bus_client.message import HiveMessage, HiveMessageType
 from hivescope.topology import TopologyBuilder
 from ovos_bus_client.message import Message
 from ovos_bus_client.session import Session
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -116,16 +114,17 @@ def test_policy_review_denies_default_session_for_non_admin():
     the HELLO payload).
     """
     from types import SimpleNamespace
+
     from hivemind_ovos_agent_plugin.policy import OVOSAgentPolicy
 
-    class _Msg:
-        msg_type = "recognizer_loop:utterance"
-        data = {"utterances": ["hi"]}
-        context = {"session": {"session_id": "default", "site_id": "test"}}
-
+    msg = SimpleNamespace(
+        msg_type="recognizer_loop:utterance",
+        data={"utterances": ["hi"]},
+        context={"session": {"session_id": "default", "site_id": "test"}},
+    )
     client = SimpleNamespace(is_admin=False)
     policy = OVOSAgentPolicy(hm_protocol=None)
-    verdict = policy.review(_Msg(), client)
+    verdict = policy.review(msg, client)
 
     assert verdict.denied, "OVOSAgentPolicy must deny non-admin default-session payload"
     assert verdict.code == "session_id_default_forbidden", verdict.code
@@ -136,16 +135,17 @@ def test_policy_review_allows_default_session_for_admin():
     branches on client.is_admin and skips the refusal (SESSION-1 §3.1).
     """
     from types import SimpleNamespace
+
     from hivemind_ovos_agent_plugin.policy import OVOSAgentPolicy
 
-    class _Msg:
-        msg_type = "recognizer_loop:utterance"
-        data = {"utterances": ["hi"]}
-        context = {"session": {"session_id": "default", "site_id": "test"}}
-
+    msg = SimpleNamespace(
+        msg_type="recognizer_loop:utterance",
+        data={"utterances": ["hi"]},
+        context={"session": {"session_id": "default", "site_id": "test"}},
+    )
     client = SimpleNamespace(is_admin=True)
     policy = OVOSAgentPolicy(hm_protocol=None)
-    verdict = policy.review(_Msg(), client)
+    verdict = policy.review(msg, client)
 
     assert not verdict.denied, (
         "OVOSAgentPolicy must allow admin client with session_id='default'"

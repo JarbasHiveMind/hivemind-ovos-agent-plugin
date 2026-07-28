@@ -22,6 +22,7 @@ def _has_skill():
 @pytest.mark.slow
 def test_ovos_agent_answers_via_real_skill():
     from ovoscope import get_minicroft
+
     from hivemind_ovos_agent_plugin import OVOSAgentProtocol
     craft = get_minicroft([_SKILL])
     try:
@@ -35,5 +36,6 @@ def test_ovos_agent_answers_via_real_skill():
     finally:
         try:
             craft.stop()
-        except Exception:
+        # Cleanup should not replace the test's primary assertion failure.
+        except Exception:  # noqa: BLE001,S110
             pass

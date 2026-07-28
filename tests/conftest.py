@@ -2,8 +2,8 @@ import threading
 from unittest.mock import MagicMock
 
 import pytest
-from ovos_utils.fakebus import FakeBus
 from hivemind_plugin_manager.protocols import ClientCallbacks
+from ovos_utils.fakebus import FakeBus
 
 from hivemind_ovos_agent_plugin import OVOSAgentProtocol
 

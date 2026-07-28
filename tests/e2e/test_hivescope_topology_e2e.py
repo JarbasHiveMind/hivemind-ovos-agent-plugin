@@ -20,12 +20,12 @@ import pytest
 
 pytest.importorskip("hivescope")
 
-from hivemind_bus_client.message import HiveMessage, HiveMessageType  # noqa: E402
-from ovos_bus_client.message import Message  # noqa: E402
-from ovos_utils.fakebus import FakeBus  # noqa: E402
-from hivescope.topology import TopologyBuilder  # noqa: E402
+from hivemind_bus_client.message import HiveMessage, HiveMessageType
+from hivescope.topology import TopologyBuilder
+from ovos_bus_client.message import Message
+from ovos_utils.fakebus import FakeBus
 
-from hivemind_ovos_agent_plugin import OVOSAgentProtocol  # noqa: E402
+from hivemind_ovos_agent_plugin import OVOSAgentProtocol
 
 
 def _make_agent() -> OVOSAgentProtocol:

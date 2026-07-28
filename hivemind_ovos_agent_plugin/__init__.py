@@ -4,6 +4,8 @@ import time
 from collections.abc import Iterator
 from typing import Any
 
+from hivemind_bus_client.message import HiveMessage, HiveMessageType
+from hivemind_plugin_manager.protocols import AgentProtocol
 from ovos_bus_client import MessageBusClient
 from ovos_bus_client.message import Message
 from ovos_bus_client.session import Session, SessionManager
@@ -12,15 +14,14 @@ from ovos_utils.fakebus import FakeBus
 from ovos_utils.log import LOG
 from pyee import EventEmitter
 
-from hivemind_bus_client.message import HiveMessage, HiveMessageType
-from hivemind_plugin_manager.protocols import AgentProtocol
-
-from hivemind_ovos_agent_plugin.policy import (AddBlacklistedIntent,
-                                                AddBlacklistedSkill,
-                                                OVOSAgentPolicy,
-                                                RewriteUtterance,
-                                                SetContextField,
-                                                SetSessionField)
+from hivemind_ovos_agent_plugin.policy import (
+    AddBlacklistedIntent,
+    AddBlacklistedSkill,
+    OVOSAgentPolicy,
+    RewriteUtterance,
+    SetContextField,
+    SetSessionField,
+)
 from hivemind_ovos_agent_plugin.version import __version__
 
 try:
@@ -68,7 +69,7 @@ class OVOSAgentProtocol(AgentProtocol):
         self.register_bus_handlers()
 
     def _connect_messagebus(self, host: str, port: int) -> MessageBusClient:
-        timeout = self.config.get("connection_timeout", 10)
+        timeout = self._connection_timeout()
         bus = MessageBusClient(
             host=host,
             port=port,
@@ -101,7 +102,9 @@ class OVOSAgentProtocol(AgentProtocol):
         try:
             bus.remove("hive.send.downstream", self.handle_send)
             bus.remove("message", self.handle_internal_mycroft)
-        except Exception as error:
+        # Handler APIs differ across supported bus releases. Cleanup must not
+        # hide the delivery failure that caused this bus to be retired.
+        except Exception as error:  # noqa: BLE001
             LOG.debug(f"Failed to detach stale OVOS bus handlers: {error!r}")
 
     def _bus_write_lock(self, bus: MessageBusClient) -> threading.Lock:
@@ -120,10 +123,18 @@ class OVOSAgentProtocol(AgentProtocol):
         with lock:
             try:
                 bus.close()
-            except Exception as error:
+            # Closing a stale transport is best-effort and release-specific.
+            except Exception as error:  # noqa: BLE001
                 LOG.debug(f"Failed to close {reason} OVOS bus: {error!r}")
         with self._bus_state_lock:
             self._bus_write_locks.pop(id(bus), None)
+
+    def _connection_timeout(self) -> float:
+        raw = self.config.get("connection_timeout", 10)
+        try:
+            return max(0.0, float(raw))
+        except (TypeError, ValueError):
+            return 10.0
 
     def _delivery_timeout(self) -> float:
         raw = self.config.get("delivery_timeout", 10)
@@ -220,6 +231,8 @@ class OVOSAgentProtocol(AgentProtocol):
             LOG.warning(f"Reconnecting OVOS messagebus at ws://{host}:{port}")
             try:
                 replacement = self._connect_messagebus(host, port)
+            # Any connection-construction failure must trip the cooldown
+            # before the original error is propagated.
             except Exception:
                 with self._bus_state_lock:
                     if failed_bus is self._owned_bus:
@@ -230,6 +243,8 @@ class OVOSAgentProtocol(AgentProtocol):
 
             try:
                 self.register_bus_handlers(replacement)
+            # A partially registered replacement is unusable regardless of
+            # which emitter implementation raised the error.
             except Exception:
                 self._close_bus(replacement, "unregistered")
                 with self._bus_state_lock:
@@ -311,13 +326,14 @@ class OVOSAgentProtocol(AgentProtocol):
         import queue
         import uuid
         qid = uuid.uuid4().hex
-        q: "queue.Queue" = queue.Queue()
+        q: queue.Queue = queue.Queue()
 
         def _on_speak(msg):
             if isinstance(msg, str):
                 try:
                     msg = Message.deserialize(msg)
-                except Exception:
+                # Ignore malformed third-party bus payloads.
+                except Exception:  # noqa: BLE001
                     return
             if msg.msg_type == "speak" and msg.context.get("query_id") == qid:
                 q.put(msg.data.get("utterance", ""))
@@ -326,7 +342,8 @@ class OVOSAgentProtocol(AgentProtocol):
             if isinstance(msg, str):
                 try:
                     msg = Message.deserialize(msg)
-                except Exception:
+                # Ignore malformed third-party bus payloads.
+                except Exception:  # noqa: BLE001
                     return
             if msg.context.get("query_id") == qid:
                 q.put(None)
@@ -413,4 +430,14 @@ class OVOSAgentProtocol(AgentProtocol):
 OVOSProtocol = OVOSAgentProtocol
 
 
-__all__ = ["OVOSAgentProtocol", "OVOSProtocol", "__version__"]
+__all__ = [
+    "AddBlacklistedIntent",
+    "AddBlacklistedSkill",
+    "OVOSAgentPolicy",
+    "OVOSAgentProtocol",
+    "OVOSProtocol",
+    "RewriteUtterance",
+    "SetContextField",
+    "SetSessionField",
+    "__version__",
+]
