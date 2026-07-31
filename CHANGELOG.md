@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.2a4](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.2a4) (2026-07-31)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.2a3...0.3.2a4)
+
+**Merged pull requests:**
+
+- docs: rewrite README in Simplified Technical English [\#30](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/30) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.3.2a3](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.2a3) (2026-07-04)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.2a2...0.3.2a3)
