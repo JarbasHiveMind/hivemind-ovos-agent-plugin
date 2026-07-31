@@ -1,19 +1,12 @@
 # Policy Admission Chain
 
-This package ships an OVOS-specific policy plugin that participates in the
-HiveMind-core policy admission chain (spec:
-[HiveMind-core#85, comment 4478944429](https://github.com/JarbasHiveMind/HiveMind-core/issues/85)).
+This package ships an OVOS-specific policy plugin that participates in the HiveMind-core policy admission chain (spec: [HiveMind-core#85, comment 4478944429](https://github.com/JarbasHiveMind/HiveMind-core/issues/85)).
 
 ## Background
 
-`hivemind-core` runs every inbound message through a chain of `PolicyPlugin`
-instances before forwarding it to the OVOS bus. Each plugin returns a
-`Verdict`. A `Verdict.allow()` may carry zero or more `Mutation` objects — the
-chain runner applies them to the message in the order they were emitted.
+`hivemind-core` runs every inbound message through a chain of `PolicyPlugin` instances before it forwards the message to the OVOS bus. Each plugin returns a `Verdict`. A `Verdict.allow()` may carry zero or more `Mutation` objects, and the chain runner applies them to the message in the order they were emitted.
 
-The OVOS-specific mutations (those that manipulate `message.context["session"]`)
-live here rather than in the generic `hivemind-plugin-manager` package so that
-non-OVOS agents do not inherit OVOS session-shape assumptions.
+The OVOS-specific mutations, those that manipulate `message.context["session"]`, live here rather than in the generic `hivemind-plugin-manager` package. This keeps non-OVOS agents from inheriting OVOS session-shape assumptions.
 
 Source: `hivemind_ovos_agent_plugin/policy.py`
 
@@ -29,47 +22,36 @@ Declared in `pyproject.toml:47`.
 
 ## Mutations
 
-All mutations are `@dataclass` subclasses of `hivemind_plugin_manager.Mutation`.
-Each exposes an `apply(message, client) -> None` method called by the chain runner.
+All mutations are `@dataclass` subclasses of `hivemind_plugin_manager.Mutation`. Each exposes an `apply(message, client) -> None` method that the chain runner calls.
 
 | Class | Field(s) | Effect |
 |---|---|---|
-| `AddBlacklistedSkill` | `skill_id: str` | Appends to `session["blacklisted_skills"]`; no-op if already present. |
-| `AddBlacklistedIntent` | `intent_name: str` | Appends to `session["blacklisted_intents"]`; no-op if already present. |
+| `AddBlacklistedSkill` | `skill_id: str` | Appends to `session["blacklisted_skills"]`. No-op if already present. |
+| `AddBlacklistedIntent` | `intent_name: str` | Appends to `session["blacklisted_intents"]`. No-op if already present. |
 | `SetSessionField` | `key: str`, `value: Any` | Sets `session[key] = value`. |
-| `SetContextField` | `path: Tuple[str, ...]`, `value: Any` | Traverses `message.context` along `path`, creating missing intermediate dicts, then sets the leaf. |
-| `RewriteUtterance` | `text: str` | Replaces `message.data["utterances"]` with `[text]`; silent no-op on any `msg_type` other than `recognizer_loop:utterance`. |
+| `SetContextField` | `path: Tuple[str, ...]`, `value: Any` | Traverses `message.context` along `path`, creates missing intermediate dicts, then sets the leaf. |
+| `RewriteUtterance` | `text: str` | Replaces `message.data["utterances"]` with `[text]`. Silent no-op on any `msg_type` other than `recognizer_loop:utterance`. |
 
-All five mutations guard against a non-dict `message.context` or
-`message.context["session"]` by coercing to an empty dict rather than raising.
-`_ensure_session` — `hivemind_ovos_agent_plugin/policy.py:29` — is the shared
-helper that provides this guarantee.
+All five mutations guard against a non-dict `message.context` or `message.context["session"]`. Each coerces the value to an empty dict rather than raising an error. `_ensure_session`, at `hivemind_ovos_agent_plugin/policy.py:29`, is the shared helper that provides this guarantee.
 
 ## OVOSAgentPolicy
 
-`OVOSAgentPolicy(PolicyPlugin)` — `hivemind_ovos_agent_plugin/policy.py:136`
+`OVOSAgentPolicy(PolicyPlugin)`: `hivemind_ovos_agent_plugin/policy.py:136`
 
-The built-in policy. On every inbound message it:
+On every inbound message, the built-in policy:
 
-1. Calls `db.sync()` to pick up any credential changes made since the listener
-   started.
-2. Looks up the connecting client via `db.get_client_by_api_key(client.key)`.
-3. Reads `user.skill_blacklist` and `user.intent_blacklist` — property shims
-   backed by `Client.metadata` after the HPM migration.
-4. Emits one `AddBlacklistedSkill` per entry and one `AddBlacklistedIntent`
-   per entry; returns `Verdict.allow(*mutations)`.
+1. Calls `db.sync()` to pick up any credential changes made since the listener started.
+2. Looks up the connecting client through `db.get_client_by_api_key(client.key)`.
+3. Reads `user.skill_blacklist` and `user.intent_blacklist`, property shims backed by `Client.metadata` after the HPM migration.
+4. Emits one `AddBlacklistedSkill` per entry and one `AddBlacklistedIntent` per entry, then returns `Verdict.allow(*mutations)`.
 
-If `db` is unavailable, the client lookup fails, or the user record is absent,
-the policy returns `Verdict.allow()` with no mutations — it never denies.
+If `db` is unavailable, the client lookup fails, or the user record is absent, the policy returns `Verdict.allow()` with no mutations. It never denies a message.
 
-`message_blacklist` is **not** consulted. `hivemind-core` dropped outbound
-message blacklisting in favour of a whitelist-only model (`allowed_types`);
-there is no consumer for a message-type blacklist in the admission chain.
+`hivemind-core` does not consult `message_blacklist`. It dropped outbound message blacklisting in favor of a whitelist-only model (`allowed_types`), so the admission chain has no consumer for a message-type blacklist.
 
 ## All-at-once import
 
-All five mutation classes and `OVOSAgentPolicy` are re-exported from the package
-top-level (`hivemind_ovos_agent_plugin/__init__.py:14-20`):
+The package top level re-exports all five mutation classes and `OVOSAgentPolicy` (`hivemind_ovos_agent_plugin/__init__.py:14-20`):
 
 ```python
 from hivemind_ovos_agent_plugin import (
@@ -81,3 +63,6 @@ from hivemind_ovos_agent_plugin import (
     OVOSAgentPolicy,
 )
 ```
+
+---
+[← Development](development.md) · [Home](README.md)
