@@ -16,16 +16,27 @@ satellite and that bus is the production code path:
 plus the BUS path: an injected utterance answered via ``Message.reply`` is
 reverse-routed to the right satellite by ``handle_internal_mycroft``.
 """
+from __future__ import annotations
+
+from importlib.util import find_spec
+from typing import TYPE_CHECKING
+
 import pytest
 
-pytest.importorskip("hivescope")
+if TYPE_CHECKING:
+    from hivescope.topology import TopologyBuilder
 
-from hivemind_bus_client.message import HiveMessage, HiveMessageType  # noqa: E402
-from ovos_bus_client.message import Message  # noqa: E402
-from ovos_utils.fakebus import FakeBus  # noqa: E402
-from hivescope.topology import TopologyBuilder  # noqa: E402
+pytestmark = pytest.mark.skipif(
+    find_spec("hivescope") is None,
+    reason="needs hivescope",
+)
 
-from hivemind_ovos_agent_plugin import OVOSAgentProtocol  # noqa: E402
+from hivemind_bus_client.message import HiveMessage, HiveMessageType
+from hivemind_plugin_manager.protocols import ClientCallbacks
+from ovos_bus_client.message import Message
+from ovos_utils.fakebus import FakeBus
+
+from hivemind_ovos_agent_plugin import OVOSAgentProtocol
 
 
 def _make_agent() -> OVOSAgentProtocol:
@@ -39,7 +50,9 @@ def _make_agent() -> OVOSAgentProtocol:
     agent = OVOSAgentProtocol.__new__(OVOSAgentProtocol)
     agent.config = {}
     agent.hm_protocol = None  # assigned by HiveMindListenerProtocol on bind
+    agent.callbacks = ClientCallbacks()
     agent.bus = FakeBus()
+    agent._owned_bus = None
     agent.register_bus_handlers()
     return agent
 
@@ -54,6 +67,8 @@ def _fake_skill(agent: OVOSAgentProtocol, answer: str):
 
 
 def _hive(agent: OVOSAgentProtocol) -> TopologyBuilder:
+    from hivescope.topology import TopologyBuilder
+
     b = TopologyBuilder()
     m = b.add_master("M0", agent_protocol=agent)
     m.register_satellite("ovos-key", password="ovos-pw",
@@ -126,5 +141,10 @@ def test_bus_utterance_reverse_routed_to_originating_satellite():
                                    direction="in", timeout=8.0)
         assert recv is not None, \
             "skill reply never reverse-routed to the satellite"
+        texts = _speak_texts(
+            s.recorder.received(HiveMessageType.BUS.value, direction="in")
+        )
+        assert "routed back" in texts, \
+            f"expected the skill reply, got {texts!r}"
     finally:
         b.stop_all()
