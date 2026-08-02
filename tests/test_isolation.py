@@ -1,7 +1,7 @@
 """Client isolation invariant: a client must only receive messages targeted at it."""
 
-from ovos_bus_client.message import Message
 from hivemind_bus_client.message import HiveMessageType
+from ovos_bus_client.message import Message
 
 
 def _ovos_internal(msg_type, destination=None, data=None):

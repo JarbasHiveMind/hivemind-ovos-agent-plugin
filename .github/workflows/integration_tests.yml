@@ -1,0 +1,17 @@
+name: Integration Tests (live OVOS)
+
+# Live-OVOS e2e: ovoscope/MiniCroft runs a real OVOS skill through the intent
+# pipeline. Heavy, so it lives outside the fast build_tests.
+on:
+  pull_request:
+    branches: [dev, master]
+  workflow_dispatch:
+
+jobs:
+  ovoscope:
+    uses: OpenVoiceOS/gh-automations/.github/workflows/build-tests.yml@dev
+    with:
+      python_versions: '["3.11"]'
+      system_deps: 'python3-dev swig'
+      pre_install_pip: '"ovoscope" "ovos-core" "ovos-skill-hello-world" "hivemind-plugin-manager==0.7.0a1"'
+      test_path: 'tests/e2e/test_ovos_agent_ovoscope_e2e.py'
