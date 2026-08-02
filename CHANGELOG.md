@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.3a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.3a1) (2026-08-02)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.2a4...0.3.3a1)
+
+**Merged pull requests:**
+
+- fix: bound OVOS bus readiness through get\_bus [\#29](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/29) ([goldyfruit](https://github.com/goldyfruit))
+
 ## [0.3.2a4](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.2a4) (2026-07-31)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.2a3...0.3.2a4)
