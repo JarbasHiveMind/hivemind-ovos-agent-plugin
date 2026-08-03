@@ -40,7 +40,7 @@ All five mutations guard against a non-dict `message.context` or `message.contex
 
 On every inbound message, the built-in policy:
 
-1. Calls `db.sync()` to pick up any credential changes made since the listener started.
+1. Calls `db.sync()` to pick up any credential changes made since hivemind-core started.
 2. Looks up the connecting client through `db.get_client_by_api_key(client.key)`.
 3. Reads `user.skill_blacklist` and `user.intent_blacklist`, property shims backed by `Client.metadata` after the HPM migration.
 4. Emits one `AddBlacklistedSkill` per entry and one `AddBlacklistedIntent` per entry, then returns `Verdict.allow(*mutations)`.

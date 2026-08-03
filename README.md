@@ -2,7 +2,7 @@
 
 This plugin connects [HiveMind-core](https://github.com/JarbasHiveMind/HiveMind-core) to an [OpenVoiceOS](https://github.com/OpenVoiceOS) message bus.
 
-HiveMind clients connect to a `hivemind-core` listener. This plugin forwards their Mycroft `Message` payloads to a local OVOS bus, and it routes OVOS responses back to the client that sent the original message.
+HiveMind clients connect to a `hivemind-core` node. This plugin forwards their Mycroft `Message` payloads to a local OVOS bus, and it routes OVOS responses back to the client that sent the original message.
 
 ## Installation
 
