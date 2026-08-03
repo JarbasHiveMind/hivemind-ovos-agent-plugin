@@ -22,6 +22,17 @@ from hivemind_ovos_agent_plugin.policy import (
 from hivemind_ovos_agent_plugin.version import __version__
 
 
+def _is_peer_id(destination: str) -> bool:
+    """Whether a message destination names a HiveMind peer.
+
+    HiveMindClientConnection.peer mints ids as "name::session_id", plus a
+    "::suffix" when a second live connection claims the same string. OVOS
+    routes plenty of other labels through context["destination"] - "audio",
+    "skills", "ovos.gui", a skill_id - and none of them carry a session id.
+    """
+    return "::" in destination
+
+
 @dataclasses.dataclass()
 class OVOSAgentProtocol(AgentProtocol):
     """HiveMind agent protocol that bridges client messages to an OVOS bus."""
@@ -200,8 +211,12 @@ class OVOSAgentProtocol(AgentProtocol):
             target_peers = [target_peers]
 
         if target_peers:
-            for peer, client in list(self.clients.items()):
+            # snapshot: connect/disconnect mutate self.clients from another thread
+            connected = list(self.clients.items())
+            unmatched = set(target_peers)
+            for peer, client in connected:
                 if peer in target_peers:
+                    unmatched.discard(peer)
                     LOG.debug(f"{message.msg_type} - destination: {peer}")
                     message.context["source"] = "hive"
                     msg = HiveMessage(
@@ -211,6 +226,11 @@ class OVOSAgentProtocol(AgentProtocol):
                         payload=message,
                     )
                     client.send(msg)
+            for peer in unmatched:
+                if _is_peer_id(peer):
+                    LOG.warning(f"{message.msg_type} - destination peer not connected: {peer}")
+                else:
+                    LOG.debug(f"{message.msg_type} - destination is not a peer: {peer}")
 
 
 # back-compat alias for the old class name shipped from ovos-bus-client

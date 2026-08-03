@@ -1,7 +1,11 @@
 """Client isolation invariant: a client must only receive messages targeted at it."""
 
+from unittest.mock import MagicMock
+
 from hivemind_bus_client.message import HiveMessageType
 from ovos_bus_client.message import Message
+
+import hivemind_ovos_agent_plugin as hmoap
 
 
 def _ovos_internal(msg_type, destination=None, data=None):
@@ -49,6 +53,37 @@ class TestClientIsolation:
 
         agent.handle_internal_mycroft(_ovos_internal("speak", destination="ws://stranger"))
 
+        alice.send.assert_not_called()
+
+    def test_message_addressed_to_unknown_peer_logs_a_warning(self, agent, make_client, monkeypatch):
+        """A stale/reconnected peer with no live client must be searchable in
+        the logs instead of silently swallowing the reply. A reconnect mints a
+        new peer id because the session id is part of it."""
+        log = MagicMock()
+        monkeypatch.setattr(hmoap, "LOG", log)
+        alice = make_client("voice_sat::c0ffee")
+        agent.hm_protocol.clients = {"voice_sat::c0ffee": alice}
+        stale_peer = "voice_sat::deadbeef"
+
+        agent.handle_internal_mycroft(_ovos_internal("speak", destination=stale_peer))
+
+        assert log.warning.call_count == 1
+        assert stale_peer in log.warning.call_args[0][0]
+
+    def test_ordinary_ovos_destinations_do_not_warn(self, agent, make_client, monkeypatch):
+        """OVOS routes internal labels through context["destination"] on every
+        reply and every spoken line. They are not peers and must not be
+        reported as disconnected ones, or the real stale-peer case drowns."""
+        log = MagicMock()
+        monkeypatch.setattr(hmoap, "LOG", log)
+        alice = make_client("voice_sat::c0ffee")
+        agent.hm_protocol.clients = {"voice_sat::c0ffee": alice}
+
+        for destination in (["audio"], ["enclosure"], ["skills"], ["ovos.gui"],
+                            ["ovos-skill-date-time.openvoiceos"]):
+            agent.handle_internal_mycroft(_ovos_internal("speak", destination=destination))
+
+        assert not log.warning.called
         alice.send.assert_not_called()
 
     def test_forwarded_message_is_wrapped_as_bus_hivemessage(self, agent, make_client):
