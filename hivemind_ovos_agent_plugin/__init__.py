@@ -156,8 +156,9 @@ class OVOSAgentProtocol(AgentProtocol):
         hmessage = HiveMessage(msg_type, payload=payload, target_peers=[peer])
 
         if msg_type in [HiveMessageType.PROPAGATE, HiveMessageType.BROADCAST]:
-            for peer in self.clients:
-                self.clients[peer].send(hmessage)
+            # snapshot: connect/disconnect mutate self.clients from another thread
+            for client in list(self.clients.values()):
+                client.send(hmessage)
         elif msg_type == HiveMessageType.ESCALATE:
             # only slaves can escalate, ignore silently
             pass
@@ -185,7 +186,7 @@ class OVOSAgentProtocol(AgentProtocol):
             target_peers = [target_peers]
 
         if target_peers:
-            for peer, client in self.clients.items():
+            for peer, client in list(self.clients.items()):
                 if peer in target_peers:
                     LOG.debug(f"{message.msg_type} - destination: {peer}")
                     message.context["source"] = "hive"
