@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.4a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.4a1) (2026-08-04)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.3a1...0.3.4a1)
+
+**Merged pull requests:**
+
+- fix: never block Core's IOLoop waiting for the OVOS bus [\#36](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/36) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.3.3a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.3a1) (2026-08-02)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.2a4...0.3.3a1)
