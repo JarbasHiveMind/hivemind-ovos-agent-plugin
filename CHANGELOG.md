@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.5a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.5a1) (2026-08-04)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.4a1...0.3.5a1)
+
+**Merged pull requests:**
+
+- fix: iterate a snapshot of clients during fan-out [\#35](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/35) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.3.4a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.4a1) (2026-08-04)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.3a1...0.3.4a1)
