@@ -18,5 +18,10 @@ jobs:
       # triggers a buggy `pip install test` literal in gh-automations
       # that tries to install a PyPI package named "test".
       min_coverage: 0
-      # hivescope + plugin-manager pinned to released PyPI prereleases;
-      pre_install_pip: '"hivescope==0.3.0a1" "hivemind-plugin-manager==0.6.0a1" "hivemind-core==4.3.0a2"'
+      # No pre_install_pip: hivescope (and the hivemind-core it drags in)
+      # moved out of the `dev`/`test` extras — every published hivemind-core
+      # still caps hivemind-bus-client<1.0.0, which is unresolvable against
+      # this package's own >=1.0.0a1 floor (see pyproject.toml `test` extra
+      # comment). The hivescope-backed tests self-skip without it installed.
+      # Re-add a pin here (matching the `e2e` extra) once hivemind-core
+      # publishes a >=1.0.0a1-compatible release.
