@@ -27,10 +27,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# hivescope is deliberately NOT in `test`/`dev`: every published hivemind-core
+# (up to 4.11.2a1) still caps hivemind-bus-client<1.0.0, and hivescope pulls
+# hivemind-core in unconditionally. Depending on it here would make this
+# package's own bus-client>=1.0.0a1 floor unresolvable (circular: lifting
+# hivemind-core's cap is blocked on this package publishing a bus-client 1.x
+# alpha first). tests/test_e2e_policy.py and tests/e2e/* self-skip when
+# hivescope isn't importable, so dropping it here only shrinks coverage, not
+# correctness. Re-add once hivemind-core publishes a >=1.0.0a1-compatible
+# release; the `e2e` extra below is ready for that.
 test = [
     "pytest",
     "pytest-cov",
-    "hivescope>=0.5.2a1",
 ]
 # Alias so gh-automations' `pip install -e ".[dev]"` first-attempt path
 # resolves; without `dev` it falls through to a buggy `pip install test`
@@ -38,6 +46,11 @@ test = [
 dev = [
     "pytest",
     "pytest-cov",
+]
+# Opt-in: exercises the hivescope-backed e2e/policy tests against a real
+# hivemind-core. Only installable once hivemind-core lifts its own
+# hivemind-bus-client<1.0.0 cap (see comment on `test` above).
+e2e = [
     "hivescope>=0.5.2a1",
 ]
 
