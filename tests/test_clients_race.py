@@ -59,3 +59,31 @@ def test_fan_out_survives_concurrent_client_mutation(agent, make_client):
 
     for p, c in pre_existing.items():
         assert c.send.called, p
+
+
+class VanishingClients(dict):
+    """A peer that disconnects between the membership check and the lookup.
+
+    `in` still sees it, the indexed read no longer does -- exactly what a
+    tornado-thread disconnect does to a check-then-index on the bus thread.
+    """
+
+    def __contains__(self, key):
+        return True
+
+    def __getitem__(self, key):
+        raise KeyError(key)
+
+    def get(self, key, default=None):
+        return default
+
+
+def test_unicast_send_to_a_peer_that_just_disconnected(agent, fake_bus):
+    agent.hm_protocol.clients = VanishingClients()
+    errors = []
+    fake_bus.on("hive.client.send.error", lambda m: errors.append(m))
+
+    agent.handle_send(_send_msg(HiveMessageType.BUS, peer="ws://gone", payload={}))
+
+    assert len(errors) == 1
+    assert errors[0].data["peer"] == "ws://gone"

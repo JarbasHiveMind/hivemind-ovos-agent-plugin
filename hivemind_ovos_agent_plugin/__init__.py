@@ -163,8 +163,10 @@ class OVOSAgentProtocol(AgentProtocol):
             # only slaves can escalate, ignore silently
             pass
         elif peer:
-            if peer in self.clients:
-                client = self.clients[peer]
+            # get() + None check instead of "in" + index: a disconnect between
+            # the two would raise KeyError on the OVOS bus thread
+            client = self.clients.get(peer)
+            if client is not None:
                 client.send(hmessage)
             else:
                 LOG.error("That client is not connected")
