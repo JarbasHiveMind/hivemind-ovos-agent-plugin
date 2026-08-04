@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.6a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.6a1) (2026-08-04)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.5a1...0.3.6a1)
+
+**Merged pull requests:**
+
+- fix\(deps\): allow hivemind-bus-client 1.x [\#38](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/38) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.3.5a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.5a1) (2026-08-04)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.4a1...0.3.5a1)
