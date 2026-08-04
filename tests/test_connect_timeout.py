@@ -1,4 +1,5 @@
-"""The auto-connect branch must fail fast, not hang, when the OVOS bus is down."""
+"""The auto-connect branch must degrade, not hang and not abort, when the OVOS
+bus is down at startup."""
 import socket
 import time
 
@@ -16,16 +17,33 @@ def _closed_port() -> int:
     return port
 
 
-def test_raises_when_messagebus_unreachable():
+@pytest.fixture
+def unreachable_agent():
     port = _closed_port()
     start = time.monotonic()
-    with pytest.raises(ConnectionError) as exc:
-        # no bus passed -> __post_init__ takes the auto-connect branch and tries
-        # to reach a messagebus that isn't there
-        OVOSAgentProtocol(config={"host": "127.0.0.1", "port": port,
-                                  "connection_timeout": 1})
+    # no bus passed -> __post_init__ takes the auto-connect branch and tries
+    # to reach a messagebus that isn't there
+    agent = OVOSAgentProtocol(config={"host": "127.0.0.1", "port": port,
+                                      "connection_timeout": 1})
+    agent._startup_seconds = time.monotonic() - start
+    yield agent
+    agent.bus.close()
+
+
+def test_startup_degrades_instead_of_aborting(unreachable_agent):
+    """The node must come up and keep serving clients even with no OVOS bus."""
+    assert unreachable_agent.bus is unreachable_agent._owned_bus
+    assert unreachable_agent._startup_seconds < 10
+
+
+def test_get_bus_reports_the_bus_as_unavailable(unreachable_agent):
+    start = time.monotonic()
+    with pytest.raises(ConnectionError):
+        unreachable_agent.get_bus()
     elapsed = time.monotonic() - start
-    # fails fast (does not hang) and the message is actionable
-    assert elapsed < 10, f"took {elapsed:.1f}s — should fail near the 1s timeout"
-    assert "messagebus" in str(exc.value).lower()
-    assert str(port) in str(exc.value)
+    assert elapsed < 0.5, f"get_bus blocked for {elapsed:.2f}s"
+
+
+def test_get_bus_serves_the_bus_once_it_connects(unreachable_agent):
+    unreachable_agent.bus.connected_event.set()
+    assert unreachable_agent.get_bus() is unreachable_agent.bus

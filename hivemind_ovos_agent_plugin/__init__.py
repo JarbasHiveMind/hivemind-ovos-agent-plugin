@@ -42,19 +42,21 @@ class OVOSAgentProtocol(AgentProtocol):
                 emitter=EventEmitter(),
             )
             self.bus.run_in_thread()
-            # Fail fast instead of blocking forever: a bare ``connected_event.wait()``
-            # hangs indefinitely when no OVOS messagebus is reachable, which silently
-            # stalls whatever hosts this protocol (e.g. HiveMindService.run() never
-            # binds its network listeners). Raise a clear, actionable error instead.
-            if not self.bus.connected_event.wait(timeout):
-                self.bus.close()
-                raise ConnectionError(
-                    f"Could not connect to the OVOS messagebus at "
-                    f"ws://{ovos_bus_address}:{ovos_bus_port} within {timeout}s. "
-                    f"Is the OVOS messagebus running? Start it (e.g. 'ovos-messagebus'), "
-                    f"or set the agent protocol's host/port/connection_timeout in the config."
-                )
             self._owned_bus = self.bus
+            # Bounded wait, then carry on. Blocking forever stalls whatever
+            # hosts this protocol, and raising takes the whole node down over
+            # a messagebus that is merely slow to boot — on a Pi that is the
+            # normal case. MessageBusClient keeps reconnecting on its own, and
+            # until it succeeds ``get_bus`` reports the bus as unavailable, so
+            # Core answers its clients BACKEND_UNAVAILABLE instead of vanishing.
+            if not self.bus.connected_event.wait(timeout):
+                LOG.error(
+                    f"Could not connect to the OVOS messagebus at "
+                    f"ws://{ovos_bus_address}:{ovos_bus_port} within {timeout}s, "
+                    f"retrying in the background. Is the OVOS messagebus running? "
+                    f"Start it (e.g. 'ovos-messagebus'), or set the agent "
+                    f"protocol's host/port/connection_timeout in the config."
+                )
         self.register_bus_handlers()
 
     def register_bus_handlers(self):
@@ -70,20 +72,30 @@ class OVOSAgentProtocol(AgentProtocol):
             return 10.0
 
     def get_bus(self, client=None) -> FakeBus | MessageBusClient:
-        """Return the current bus once its own reconnect loop restores it.
+        """Return the current bus, or raise at once if it is not connected.
 
-        ``MessageBusClient`` owns websocket recovery. The agent neither sends
-        the client's message nor creates a competing connection; it only bounds
-        how long Core can wait for the plugin-created bus to become usable.
-        Caller-supplied buses remain entirely caller-owned.
+        Core calls this inline on the single IOLoop thread that serves every
+        satellite, so this method must never wait: one disconnected OVOS bus
+        would otherwise freeze the whole node for the connection timeout, and
+        each retrying satellite would pay that price again on the same thread.
+        ``MessageBusClient`` owns websocket recovery and keeps reconnecting in
+        the background; raising here lets Core answer BACKEND_UNAVAILABLE in
+        milliseconds meanwhile. Callers that can afford to wait use
+        ``wait_for_bus``. Caller-supplied buses remain entirely caller-owned.
         """
         bus = self.bus
-        if bus is not self._owned_bus:
+        if bus is not self._owned_bus or bus.connected_event.is_set():
             return bus
-        timeout = self._connection_timeout()
-        if bus.connected_event.wait(timeout):
-            return bus
-        raise ConnectionError(f"OVOS messagebus did not reconnect within {timeout}s")
+        raise ConnectionError("OVOS messagebus is not connected")
+
+    def wait_for_bus(self, timeout: float | None = None) -> bool:
+        """Block until the plugin-created bus is connected, at most ``timeout``
+        seconds. For setup code only — never call it from Core's IOLoop thread."""
+        if self.bus is not self._owned_bus:
+            return True
+        if timeout is None:
+            timeout = self._connection_timeout()
+        return self.bus.connected_event.wait(timeout)
 
     def natural_language_query(self, utterance: str,
                                lang: str) -> "Iterator[str | None]":
