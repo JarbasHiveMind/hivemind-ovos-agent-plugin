@@ -14,7 +14,7 @@ pip install -e .[test]
 pytest tests/ -v
 ```
 
-The test suite uses `FakeBus` from `ovos-utils` and `MagicMock` for client connections, so it does not need a running OVOS instance or HiveMind listener.
+The test suite uses `FakeBus` from `ovos-utils` and `MagicMock` for client connections, so it does not need a running OVOS instance or hivemind-core node.
 
 ### Coverage
 
