@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.6a2](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.6a2) (2026-08-10)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.6a1...0.3.6a2)
+
+**Merged pull requests:**
+
+- docs: drop misleading listener terminology [\#34](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/34) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.3.6a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.6a1) (2026-08-04)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.5a1...0.3.6a1)
