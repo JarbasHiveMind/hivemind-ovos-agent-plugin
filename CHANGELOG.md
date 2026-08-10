@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.7a2](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.7a2) (2026-08-10)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.7a1...0.3.7a2)
+
+**Merged pull requests:**
+
+- docs: add funding attribution [\#44](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/44) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.3.7a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.7a1) (2026-08-10)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.6a2...0.3.7a1)
