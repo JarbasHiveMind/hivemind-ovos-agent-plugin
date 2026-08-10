@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.7a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.7a1) (2026-08-10)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.6a2...0.3.7a1)
+
+**Merged pull requests:**
+
+- fix: log unmatched destination peers in handle\_internal\_mycroft [\#37](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/37) ([JarbasAl](https://github.com/JarbasAl))
+- fix: unpin stale hivemind-plugin-manager from the ovoscope CI job [\#28](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/28) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.3.6a2](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.6a2) (2026-08-10)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.6a1...0.3.6a2)
