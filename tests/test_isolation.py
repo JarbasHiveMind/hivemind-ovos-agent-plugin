@@ -60,7 +60,7 @@ class TestClientIsolation:
         the logs instead of silently swallowing the reply. A reconnect mints a
         new peer id because the session id is part of it."""
         log = MagicMock()
-        monkeypatch.setattr(hmoap, "LOG", log)
+        monkeypatch.setattr(hmoap, "_FORWARD_LOGGER", log)
         alice = make_client("voice_sat::c0ffee")
         agent.hm_protocol.clients = {"voice_sat::c0ffee": alice}
         stale_peer = "voice_sat::deadbeef"
@@ -68,14 +68,16 @@ class TestClientIsolation:
         agent.handle_internal_mycroft(_ovos_internal("speak", destination=stale_peer))
 
         assert log.warning.call_count == 1
-        assert stale_peer in log.warning.call_args[0][0]
+        # lazy args: fmt % args, not a pre-formatted string
+        args = log.warning.call_args[0]
+        assert stale_peer in args[0] % args[1:]
 
     def test_ordinary_ovos_destinations_do_not_warn(self, agent, make_client, monkeypatch):
         """OVOS routes internal labels through context["destination"] on every
         reply and every spoken line. They are not peers and must not be
         reported as disconnected ones, or the real stale-peer case drowns."""
         log = MagicMock()
-        monkeypatch.setattr(hmoap, "LOG", log)
+        monkeypatch.setattr(hmoap, "_FORWARD_LOGGER", log)
         alice = make_client("voice_sat::c0ffee")
         agent.hm_protocol.clients = {"voice_sat::c0ffee": alice}
 

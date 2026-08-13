@@ -22,6 +22,31 @@ from hivemind_ovos_agent_plugin.policy import (
 from hivemind_ovos_agent_plugin.version import __version__
 
 
+#: Forwarding-path logger, resolved once.
+#:
+#: ``LOG.debug``/``LOG.warning`` resolve the calling module, function and line
+#: with ``inspect.stack()`` on every call, before the level is consulted, so a
+#: record an INFO-level node discards costs as much as one it emits.
+#: ``handle_internal_mycroft`` is registered as the catch-all ``message``
+#: handler, so it runs for every message on the OVOS bus and pays that per
+#: message, on the bus client's handler thread.
+#:
+#: ``LOG.create_logger`` returns the same OVOS-configured logger those calls
+#: would have built -- same formatter and handlers -- and registers it in
+#: ``LOG._loggers``, so ``LOG.init``/``LOG.set_level`` still retargets its
+#: level. Only the per-call stack walk is dropped. Resolved lazily because
+#: ``LOG.init`` usually runs after import.
+_FORWARD_LOGGER = None
+
+
+def _forward_logger():
+    """Return the cached forwarding-path logger, creating it on first use."""
+    global _FORWARD_LOGGER
+    if _FORWARD_LOGGER is None:
+        _FORWARD_LOGGER = LOG.create_logger(f"{LOG.name} - {__name__}")
+    return _FORWARD_LOGGER
+
+
 def _is_peer_id(destination: str) -> bool:
     """Whether a message destination names a HiveMind peer.
 
@@ -214,10 +239,11 @@ class OVOSAgentProtocol(AgentProtocol):
             # snapshot: connect/disconnect mutate self.clients from another thread
             connected = list(self.clients.items())
             unmatched = set(target_peers)
+            log = _forward_logger()
             for peer, client in connected:
                 if peer in target_peers:
                     unmatched.discard(peer)
-                    LOG.debug(f"{message.msg_type} - destination: {peer}")
+                    log.debug("%s - destination: %s", message.msg_type, peer)
                     message.context["source"] = "hive"
                     msg = HiveMessage(
                         HiveMessageType.BUS,
@@ -228,9 +254,13 @@ class OVOSAgentProtocol(AgentProtocol):
                     client.send(msg)
             for peer in unmatched:
                 if _is_peer_id(peer):
-                    LOG.warning(f"{message.msg_type} - destination peer not connected: {peer}")
+                    log.warning("%s - destination peer not connected: %s",
+                                message.msg_type, peer)
                 else:
-                    LOG.debug(f"{message.msg_type} - destination is not a peer: {peer}")
+                    # The common case: OVOS routes to service names such as
+                    # "audio" or "skills", so every such message reaches here.
+                    log.debug("%s - destination is not a peer: %s",
+                              message.msg_type, peer)
 
 
 # back-compat alias for the old class name shipped from ovos-bus-client
