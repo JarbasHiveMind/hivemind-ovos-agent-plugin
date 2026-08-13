@@ -1,4 +1,5 @@
 import dataclasses
+from threading import Lock
 from collections.abc import Iterator
 from typing import Any
 
@@ -37,13 +38,44 @@ from hivemind_ovos_agent_plugin.version import __version__
 #: level. Only the per-call stack walk is dropped. Resolved lazily because
 #: ``LOG.init`` usually runs after import.
 _FORWARD_LOGGER = None
+_FORWARD_LOGGER_KEY = None
+_FORWARD_LOGGER_LOCK = Lock()
 
 
 def _forward_logger():
-    """Return the cached forwarding-path logger, creating it on first use."""
-    global _FORWARD_LOGGER
-    if _FORWARD_LOGGER is None:
-        _FORWARD_LOGGER = LOG.create_logger(f"{LOG.name} - {__name__}")
+    """Return the cached forwarding-path logger, rebuilding when LOG rewires.
+
+    Cached against ``(LOG.name, LOG.base_path)``: ``LOG.init()`` normally runs
+    after import, and a logger created before it would carry only the stdout
+    handler -- configured file logging would silently vanish from this path.
+    When the fingerprint changes, the stale entry and its handlers are dropped
+    so ``create_logger`` rebuilds against the live config. The lock keeps two
+    racing first calls from attaching duplicate handlers to the same
+    process-wide ``logging.getLogger`` name.
+    """
+    global _FORWARD_LOGGER, _FORWARD_LOGGER_KEY
+    key = (LOG.name, LOG.base_path)
+    if _FORWARD_LOGGER is None or _FORWARD_LOGGER_KEY != key:
+        with _FORWARD_LOGGER_LOCK:
+            if _FORWARD_LOGGER is None or _FORWARD_LOGGER_KEY != key:
+                name = f"{LOG.name} - {__name__}"
+                stale = LOG._loggers.pop(name, None)
+                if stale is not None:
+                    for handler in list(stale.handlers):
+                        stale.removeHandler(handler)
+                _FORWARD_LOGGER = LOG.create_logger(name)
+                _FORWARD_LOGGER_KEY = key
+    if LOG.diagnostic_mode:
+        # Mirror LOG._get_real_logger: diagnostic mode records the bus message
+        # behind each log call. Costs one attribute check when it is off.
+        try:
+            from ovos_bus_client.message import dig_for_message
+            message = dig_for_message()
+            if message:
+                _FORWARD_LOGGER.debug(
+                    f"DIAGNOSTIC - source bus message {message.serialize()}")
+        except ImportError:
+            pass
     return _FORWARD_LOGGER
 
 

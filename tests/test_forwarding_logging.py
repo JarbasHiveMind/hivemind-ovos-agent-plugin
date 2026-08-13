@@ -82,6 +82,7 @@ def test_forward_logger_follows_log_set_level():
 
 def test_debug_output_is_unchanged_when_enabled(agent, caplog):
     log = hap._forward_logger()
+    previous = log.level
     log.setLevel(logging.DEBUG)
     log.propagate = True
     try:
@@ -89,6 +90,7 @@ def test_debug_output_is_unchanged_when_enabled(agent, caplog):
             agent.handle_internal_mycroft(_msg("audio"))
     finally:
         log.propagate = False
+        log.setLevel(previous)
 
     assert "destination is not a peer: audio" in caplog.text
 
@@ -103,3 +105,63 @@ def test_unconnected_peer_still_warns(agent, caplog):
         log.propagate = False
 
     assert "not connected" in caplog.text
+
+
+def _reset_forward_logger_state():
+    """Drop the cache AND the underlying logging singleton's handlers.
+
+    ``logging.getLogger(name)`` is process-wide; popping ``LOG._loggers``
+    alone leaves its handlers attached, and the next resolve would stack a
+    second one -- exactly the bug the lock exists to prevent.
+    """
+    name = f"{LOG.name} - {hap.__name__}"
+    stale = logging.getLogger(name)
+    for handler in list(stale.handlers):
+        stale.removeHandler(handler)
+    LOG._loggers.pop(name, None)
+    hap._FORWARD_LOGGER = None
+    hap._FORWARD_LOGGER_KEY = None
+
+
+def test_logger_rewires_after_log_init_changes_base_path(tmp_path):
+    """A logger resolved before LOG.init must pick up file logging after it.
+
+    LOG.init sets base_path and later loggers get a RotatingFileHandler; a
+    cached pre-init logger would silently keep stdout only.
+    """
+    hap._forward_logger()
+    previous = LOG.base_path
+    try:
+        LOG.base_path = str(tmp_path)
+        log = hap._forward_logger()
+        kinds = {type(h).__name__ for h in log.handlers}
+        assert "RotatingFileHandler" in kinds, (
+            "cached logger kept its pre-init handlers; file logging was lost")
+    finally:
+        LOG.base_path = previous
+        _reset_forward_logger_state()
+
+
+def test_concurrent_first_use_attaches_handlers_once():
+    """Two racing first calls must not double the handlers (duplicate log lines)."""
+    import threading
+    _reset_forward_logger_state()
+    gate = threading.Event()
+
+    def resolve():
+        gate.wait()
+        hap._forward_logger()
+
+    threads = [threading.Thread(target=resolve) for _ in range(8)]
+    for t in threads:
+        t.start()
+    gate.set()
+    for t in threads:
+        t.join(timeout=10)
+
+    handlers = hap._forward_logger().handlers
+    assert len(handlers) == len({id(h) for h in handlers})
+    stream_handlers = [h for h in handlers
+                       if type(h).__name__ == "StreamHandler"]
+    assert len(stream_handlers) <= 1, (
+        f"racing first use attached {len(stream_handlers)} stdout handlers")
