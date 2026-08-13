@@ -118,6 +118,7 @@ def _reset_forward_logger_state():
     stale = logging.getLogger(name)
     for handler in list(stale.handlers):
         stale.removeHandler(handler)
+        handler.close()
     LOG._loggers.pop(name, None)
     hap._FORWARD_LOGGER = None
     hap._FORWARD_LOGGER_KEY = None

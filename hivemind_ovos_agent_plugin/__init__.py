@@ -63,6 +63,7 @@ def _forward_logger():
                 if stale is not None:
                     for handler in list(stale.handlers):
                         stale.removeHandler(handler)
+                        handler.close()
                 _FORWARD_LOGGER = LOG.create_logger(name)
                 _FORWARD_LOGGER_KEY = key
     if LOG.diagnostic_mode:
