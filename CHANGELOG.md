@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.8a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.8a1) (2026-08-14)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.7a2...0.3.8a1)
+
+**Merged pull requests:**
+
+- fix: raise ovos-bus-client floor to 2.8.3a1 for send-side wire twins [\#48](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/48) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.3.7a2](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.7a2) (2026-08-10)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.7a1...0.3.7a2)
