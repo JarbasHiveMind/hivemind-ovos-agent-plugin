@@ -1,4 +1,5 @@
 import dataclasses
+from threading import Lock
 from collections.abc import Iterator
 from typing import Any
 
@@ -20,6 +21,63 @@ from hivemind_ovos_agent_plugin.policy import (
     SetSessionField,
 )
 from hivemind_ovos_agent_plugin.version import __version__
+
+
+#: Forwarding-path logger, resolved once.
+#:
+#: ``LOG.debug``/``LOG.warning`` resolve the calling module, function and line
+#: with ``inspect.stack()`` on every call, before the level is consulted, so a
+#: record an INFO-level node discards costs as much as one it emits.
+#: ``handle_internal_mycroft`` is registered as the catch-all ``message``
+#: handler, so it runs for every message on the OVOS bus and pays that per
+#: message, on the bus client's handler thread.
+#:
+#: ``LOG.create_logger`` returns the same OVOS-configured logger those calls
+#: would have built -- same formatter and handlers -- and registers it in
+#: ``LOG._loggers``, so ``LOG.init``/``LOG.set_level`` still retargets its
+#: level. Only the per-call stack walk is dropped. Resolved lazily because
+#: ``LOG.init`` usually runs after import.
+_FORWARD_LOGGER = None
+_FORWARD_LOGGER_KEY = None
+_FORWARD_LOGGER_LOCK = Lock()
+
+
+def _forward_logger():
+    """Return the cached forwarding-path logger, rebuilding when LOG rewires.
+
+    Cached against ``(LOG.name, LOG.base_path)``: ``LOG.init()`` normally runs
+    after import, and a logger created before it would carry only the stdout
+    handler -- configured file logging would silently vanish from this path.
+    When the fingerprint changes, the stale entry and its handlers are dropped
+    so ``create_logger`` rebuilds against the live config. The lock keeps two
+    racing first calls from attaching duplicate handlers to the same
+    process-wide ``logging.getLogger`` name.
+    """
+    global _FORWARD_LOGGER, _FORWARD_LOGGER_KEY
+    key = (LOG.name, LOG.base_path)
+    if _FORWARD_LOGGER is None or _FORWARD_LOGGER_KEY != key:
+        with _FORWARD_LOGGER_LOCK:
+            if _FORWARD_LOGGER is None or _FORWARD_LOGGER_KEY != key:
+                name = f"{LOG.name} - {__name__}"
+                stale = LOG._loggers.pop(name, None)
+                if stale is not None:
+                    for handler in list(stale.handlers):
+                        stale.removeHandler(handler)
+                        handler.close()
+                _FORWARD_LOGGER = LOG.create_logger(name)
+                _FORWARD_LOGGER_KEY = key
+    if LOG.diagnostic_mode:
+        # Mirror LOG._get_real_logger: diagnostic mode records the bus message
+        # behind each log call. Costs one attribute check when it is off.
+        try:
+            from ovos_bus_client.message import dig_for_message
+            message = dig_for_message()
+            if message:
+                _FORWARD_LOGGER.debug(
+                    f"DIAGNOSTIC - source bus message {message.serialize()}")
+        except ImportError:
+            pass
+    return _FORWARD_LOGGER
 
 
 def _is_peer_id(destination: str) -> bool:
@@ -214,10 +272,11 @@ class OVOSAgentProtocol(AgentProtocol):
             # snapshot: connect/disconnect mutate self.clients from another thread
             connected = list(self.clients.items())
             unmatched = set(target_peers)
+            log = _forward_logger()
             for peer, client in connected:
                 if peer in target_peers:
                     unmatched.discard(peer)
-                    LOG.debug(f"{message.msg_type} - destination: {peer}")
+                    log.debug("%s - destination: %s", message.msg_type, peer)
                     message.context["source"] = "hive"
                     msg = HiveMessage(
                         HiveMessageType.BUS,
@@ -228,9 +287,13 @@ class OVOSAgentProtocol(AgentProtocol):
                     client.send(msg)
             for peer in unmatched:
                 if _is_peer_id(peer):
-                    LOG.warning(f"{message.msg_type} - destination peer not connected: {peer}")
+                    log.warning("%s - destination peer not connected: %s",
+                                message.msg_type, peer)
                 else:
-                    LOG.debug(f"{message.msg_type} - destination is not a peer: {peer}")
+                    # The common case: OVOS routes to service names such as
+                    # "audio" or "skills", so every such message reaches here.
+                    log.debug("%s - destination is not a peer: %s",
+                              message.msg_type, peer)
 
 
 # back-compat alias for the old class name shipped from ovos-bus-client
