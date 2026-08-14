@@ -1,7 +1,7 @@
 """Tests for OVOSAgentProtocol.handle_send (downstream dispatch from OVOS bus)."""
 
-from ovos_bus_client.message import Message
 from hivemind_bus_client.message import HiveMessage, HiveMessageType
+from ovos_bus_client.message import Message
 
 
 def _send_msg(msg_type, peer=None, payload=None):
