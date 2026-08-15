@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.8a2](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.8a2) (2026-08-15)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.8a1...0.3.8a2)
+
+**Merged pull requests:**
+
+- docs: add AGENTS.md with per-repo agent conventions [\#50](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/50) ([JarbasAl](https://github.com/JarbasAl))
+- perf: stop paying for discarded logs when forwarding bus messages [\#47](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/47) ([goldyfruit](https://github.com/goldyfruit))
+
 ## [0.3.8a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.8a1) (2026-08-14)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.7a2...0.3.8a1)
