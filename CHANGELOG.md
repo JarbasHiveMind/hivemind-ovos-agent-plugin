@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.9a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.9a1) (2026-08-31)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.8a2...0.3.9a1)
+
+**Merged pull requests:**
+
+- fix: map the Layer-1 session\_id back to the client's name outbound [\#53](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/53) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.3.8a2](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.8a2) (2026-08-15)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.8a1...0.3.8a2)
