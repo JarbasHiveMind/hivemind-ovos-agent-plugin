@@ -1,3 +1,4 @@
+import copy
 import dataclasses
 from threading import Lock
 from collections.abc import Iterator
@@ -258,6 +259,36 @@ class OVOSAgentProtocol(AgentProtocol):
                     )
                 )
 
+    @staticmethod
+    def _nat_outbound_session(message: Message, client) -> Message:
+        """Recover the client's declared session name from its layer1 id.
+
+        hivemind-core derives the layer1 session_id as
+        ``f"{conn_nonce}:{declared_session_id}"`` at the inbound boundary,
+        namespacing each connection's declared session under a per-connection
+        nonce so two clients (or two multiplexed sessions on one connection)
+        never collide on the OVOS bus. Outbound, the declared name is
+        recovered per message by stripping this connection's nonce prefix --
+        not by reading ``client.sess.session_id``, which only holds the
+        connection's *current* declared session and would be wrong for any
+        earlier-declared, still in-flight session on a multiplexing client.
+
+        Returns a per-client copy; the caller's ``message`` is shared across
+        every matching peer and must not be mutated.
+        """
+        session = message.context.get("session")
+        nonce = getattr(client, "conn_nonce", None)
+        sid = session.get("session_id") if session else None
+        prefix = f"{nonce}:" if nonce else None
+        if not session or not prefix or not isinstance(sid, str) or not sid.startswith(prefix):
+            return message
+        declared = sid[len(prefix):]
+        if not declared:
+            return message
+        payload = copy.deepcopy(message)
+        payload.context["session"]["session_id"] = declared
+        return payload
+
     def handle_internal_mycroft(self, message: str):
         """Forward internal messages to clients if they are the target.
 
@@ -278,11 +309,12 @@ class OVOSAgentProtocol(AgentProtocol):
                     unmatched.discard(peer)
                     log.debug("%s - destination: %s", message.msg_type, peer)
                     message.context["source"] = "hive"
+                    payload = self._nat_outbound_session(message, client)
                     msg = HiveMessage(
                         HiveMessageType.BUS,
                         source_peer=peer,
                         target_peers=target_peers,
-                        payload=message,
+                        payload=payload,
                     )
                     client.send(msg)
             for peer in unmatched:
