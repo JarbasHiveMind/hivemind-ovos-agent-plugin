@@ -16,7 +16,7 @@ dependencies = [
     # 2.6.5a1 clears connected_event on websocket close/error, which makes
     # get_bus() health checks authoritative before Core emits client traffic.
     "ovos-bus-client>=2.8.3a1,<3.0.0",
-    "ovos-config>=0.0.12,<3.0.0",
+    "ovos-config>=0.0.12,<4.0.0",
     "ovos-utils>=0.8.2,<1.0.0",
     # 1.x removes HiveMessageType.THIRDPRTY, which this plugin never used;
     # HiveMessage/HiveMessageType(.BUS/.PROPAGATE/.BROADCAST/.ESCALATE/.QUERY)
