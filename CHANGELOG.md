@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.4.0a1) (2026-09-03)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.10a1...0.4.0a1)
+
+**Merged pull requests:**
+
+- feat: forward hub bus messages to the client that owns the session \(layer-2 session-NAT delivery\) [\#57](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/57) ([JarbasAl](https://github.com/JarbasAl))
+
 ## [0.3.10a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.3.10a1) (2026-09-01)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.9a1...0.3.10a1)
