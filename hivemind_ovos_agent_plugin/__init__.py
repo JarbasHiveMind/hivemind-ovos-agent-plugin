@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from hivemind_bus_client.message import HiveMessage, HiveMessageType
+from ovos_spec_tools import migration_counterpart
 from hivemind_plugin_manager.protocols import AgentProtocol
 from ovos_bus_client import MessageBusClient
 from ovos_bus_client.message import Message
@@ -264,11 +265,13 @@ class OVOSAgentProtocol(AgentProtocol):
         """Recover the client's declared session name from its layer1 id.
 
         hivemind-core derives the layer1 session_id as
-        ``f"{conn_nonce}:{declared_session_id}"`` at the inbound boundary,
-        namespacing each connection's declared session under a per-connection
-        nonce so two clients (or two multiplexed sessions on one connection)
-        never collide on the OVOS bus. Outbound, the declared name is
-        recovered per message by stripping this connection's nonce prefix --
+        ``f"{session_namespace}:{declared_session_id}"`` at the inbound
+        boundary, namespacing each connection's declared session under the
+        client's durable, identity-derived ``session_namespace`` so two clients
+        (or two multiplexed sessions on one connection) never collide on the
+        OVOS bus. That namespace is hub-salted and survives a reconnect, unlike
+        the per-connection ``conn_nonce``. Outbound, the declared name is
+        recovered per message by stripping this client's namespace prefix --
         not by reading ``client.sess.session_id``, which only holds the
         connection's *current* declared session and would be wrong for any
         earlier-declared, still in-flight session on a multiplexing client.
@@ -277,9 +280,9 @@ class OVOSAgentProtocol(AgentProtocol):
         every matching peer and must not be mutated.
         """
         session = message.context.get("session")
-        nonce = getattr(client, "conn_nonce", None)
+        namespace = getattr(client, "session_namespace", None)
         sid = session.get("session_id") if session else None
-        prefix = f"{nonce}:" if nonce else None
+        prefix = f"{namespace}:" if namespace else None
         if not session or not prefix or not isinstance(sid, str) or not sid.startswith(prefix):
             return message
         declared = sid[len(prefix):]
@@ -299,14 +302,17 @@ class OVOSAgentProtocol(AgentProtocol):
         if not isinstance(target_peers, list):
             target_peers = [target_peers]
 
+        # snapshot: connect/disconnect mutate self.clients from another thread
+        connected = list(self.clients.items())
+        log = _forward_logger()
+        delivered = set()
+
         if target_peers:
-            # snapshot: connect/disconnect mutate self.clients from another thread
-            connected = list(self.clients.items())
             unmatched = set(target_peers)
-            log = _forward_logger()
             for peer, client in connected:
                 if peer in target_peers:
                     unmatched.discard(peer)
+                    delivered.add(peer)
                     log.debug("%s - destination: %s", message.msg_type, peer)
                     message.context["source"] = "hive"
                     payload = self._nat_outbound_session(message, client)
@@ -326,6 +332,89 @@ class OVOSAgentProtocol(AgentProtocol):
                     # "audio" or "skills", so every such message reaches here.
                     log.debug("%s - destination is not a peer: %s",
                               message.msg_type, peer)
+
+        # Session-ownership delivery: a hub bus message replaying a connected
+        # client's session must reach that client even when destination does
+        # not name its CURRENT peer id. Peer ids are per-message NAT-assigned
+        # and do not survive a satellite reconnect, so a satellite-scheduled
+        # event (e.g. an alarm firing later) carries the client's session but a
+        # stale/absent peer id and the peer-id path above drops it. Ownership
+        # keys on the client's durable, identity-derived session_namespace
+        # (hub-salted, non-secret) which survives a reconnect -- conn_nonce
+        # would not, so a session minted before a reconnect would lose its
+        # route. The session is the durable path back to the client.
+        session = message.context.get("session")
+        sid = session.get("session_id") if isinstance(session, dict) else None
+        if isinstance(sid, str):
+            for peer, client in connected:
+                if peer in delivered:
+                    continue
+                namespace = getattr(client, "session_namespace", None)
+                if not (namespace and sid.startswith(f"{namespace}:")):
+                    continue
+                # ACL posture: the peer-id path above is explicit hub-decided
+                # direct addressing (destination names this exact live
+                # connection) and is trusted as-is -- allowed_types is a
+                # send/receive contract, NOT an exhaustive receive filter, so
+                # e.g. ovos.intent.unmatched still reaches peers over that
+                # trusted path regardless of allowed_types. Session-ownership
+                # delivery is INFERRED from the client owning the session, so
+                # only this inferred path is gated deny-by-default by the
+                # client's declared allowed_types -- forwarding only message
+                # types the client admits.
+                if not self._type_allowed(message.msg_type, client):
+                    continue
+                delivered.add(peer)
+                log.debug("%s - session-owned delivery to %s",
+                          message.msg_type, peer)
+                message.context["source"] = "hive"
+                payload = self._nat_outbound_session(message, client)
+                msg = HiveMessage(
+                    HiveMessageType.BUS,
+                    source_peer=peer,
+                    target_peers=[peer],
+                    payload=payload,
+                )
+                client.send(msg)
+
+    def _client_allowed_types(self, client) -> list:
+        """Resolve a client's allowed message types, DB row winning.
+
+        Mirrors hivemind-core's MessageTypeACLPolicy._allowed_types: the live
+        DB row takes precedence so a grant/revocation applies without a
+        reconnect; the connection-time snapshot (``client.allowed_types``) is
+        used only when no DB is reachable. Any lookup error yields an empty
+        list, which the deny-by-default caller treats as "forward nothing".
+        """
+        db = getattr(self.hm_protocol, "db", None) if self.hm_protocol else None
+        if db is None:
+            return list(getattr(client, "allowed_types", None) or [])
+        try:
+            user = client.resolve_user(db)
+        except Exception:  # noqa: BLE001
+            return []
+        if user is None:
+            return list(getattr(client, "allowed_types", None) or [])
+        return list(getattr(user, "allowed_types", None) or [])
+
+    def _type_allowed(self, msg_type: str, client) -> bool:
+        """Deny-by-default, twin-aware allowed_types admission.
+
+        The frame that actually arrives on the firehose is the canonical
+        ``ovos.*`` spelling; bus-client does not re-emit a frame under its
+        legacy twin. A satellite provisioned with the legacy spelling in
+        ``allowed_types`` would therefore never match the canonical frame. The
+        migration map (single lookup, no hardcoded type list) bridges the two:
+        an ``allowed_types`` entry admits EITHER spelling of a migrated pair.
+        Empty/unresolvable allowed_types forwards nothing.
+        """
+        allowed = self._client_allowed_types(client)
+        if not allowed:
+            return False
+        if msg_type in allowed:
+            return True
+        twin = migration_counterpart(msg_type)
+        return twin is not None and twin in allowed
 
 
 # back-compat alias for the old class name shipped from ovos-bus-client

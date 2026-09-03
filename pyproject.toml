@@ -17,6 +17,9 @@ dependencies = [
     # get_bus() health checks authoritative before Core emits client traffic.
     "ovos-bus-client>=2.8.3a1,<3.0.0",
     "ovos-config>=0.0.12,<4.0.0",
+    # migration_counterpart bridges a frame's legacy/canonical twin spellings so
+    # session-owned delivery's allowed_types check admits either.
+    "ovos-spec-tools>=1.10.0a1,<2.0.0",
     "ovos-utils>=0.8.2,<1.0.0",
     # 1.x removes HiveMessageType.THIRDPRTY, which this plugin never used;
     # HiveMessage/HiveMessageType(.BUS/.PROPAGATE/.BROADCAST/.ESCALATE/.QUERY)
