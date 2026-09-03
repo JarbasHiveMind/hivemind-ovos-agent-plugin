@@ -1,11 +1,14 @@
 """Outbound reverse-NAT of the Layer-1 session_id back to the client's name.
 
-hivemind-core derives the Layer-1 session id as ``f"{conn_nonce}:{declared}"``
-per connection, so two clients (or two multiplexed sessions on one
-connection) never collide on the OVOS bus. Outbound, the server must recover
-the client's declared name per message by stripping its own nonce prefix --
-not by reading the connection's current ``sess.session_id``, which would be
-wrong for a multiplexing client juggling more than one declared session.
+hivemind-core derives the Layer-1 session id as
+``f"{session_namespace}:{declared}"`` per client, so two clients (or two
+multiplexed sessions on one connection) never collide on the OVOS bus. The
+namespace is the client's durable, identity-derived ``session_namespace``
+(hub-salted, surviving a reconnect), not the per-connection ``conn_nonce``.
+Outbound, the server must recover the client's declared name per message by
+stripping its own namespace prefix -- not by reading the connection's current
+``sess.session_id``, which would be wrong for a multiplexing client juggling
+more than one declared session.
 """
 
 from types import SimpleNamespace
@@ -17,7 +20,7 @@ import hivemind_ovos_agent_plugin as hmoap
 
 def _make_nonce_client(make_client, peer, nonce, current_session=None):
     client = make_client(peer)
-    client.conn_nonce = nonce
+    client.session_namespace = nonce
     client.sess = SimpleNamespace(session_id=current_session)
     return client
 
