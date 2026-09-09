@@ -225,6 +225,22 @@ class OVOSAgentProtocol(AgentProtocol):
             bus.remove("speak", _on_speak)
             bus.remove("ovos.utterance.handled", _on_done)
 
+    def _safe_send(self, client, hmessage: HiveMessage, peer: str) -> None:
+        """Send to a client, dropping (not raising) on a dead connection.
+
+        Under load a client can disconnect while OVOS is still publishing
+        replies for it; ``client.send`` writing to that closed socket must
+        not raise out of the bus callback thread and abort delivery to the
+        other, still-live, peers in the same fan-out.
+        """
+        try:
+            client.send(hmessage)
+        except Exception:  # noqa: BLE001
+            LOG.warning(
+                "Failed to send %s to stale client %s",
+                hmessage.msg_type, peer, exc_info=True,
+            )
+
     # mycroft handlers - from master -> slave
     def handle_send(self, message: Message):
         """ovos wants to send a HiveMessage.
@@ -240,8 +256,8 @@ class OVOSAgentProtocol(AgentProtocol):
 
         if msg_type in [HiveMessageType.PROPAGATE, HiveMessageType.BROADCAST]:
             # snapshot: connect/disconnect mutate self.clients from another thread
-            for client in list(self.clients.values()):
-                client.send(hmessage)
+            for peer_id, client in list(self.clients.items()):
+                self._safe_send(client, hmessage, peer_id)
         elif msg_type == HiveMessageType.ESCALATE:
             # only slaves can escalate, ignore silently
             pass
@@ -250,7 +266,7 @@ class OVOSAgentProtocol(AgentProtocol):
             # the two would raise KeyError on the OVOS bus thread
             client = self.clients.get(peer)
             if client is not None:
-                client.send(hmessage)
+                self._safe_send(client, hmessage, peer)
             else:
                 LOG.error("That client is not connected")
                 self.bus.emit(
@@ -322,7 +338,7 @@ class OVOSAgentProtocol(AgentProtocol):
                         target_peers=target_peers,
                         payload=payload,
                     )
-                    client.send(msg)
+                    self._safe_send(client, msg, peer)
             for peer in unmatched:
                 if _is_peer_id(peer):
                     log.warning("%s - destination peer not connected: %s",
@@ -375,7 +391,7 @@ class OVOSAgentProtocol(AgentProtocol):
                     target_peers=[peer],
                     payload=payload,
                 )
-                client.send(msg)
+                self._safe_send(client, msg, peer)
 
     def _client_allowed_types(self, client) -> list:
         """Resolve a client's allowed message types, DB row winning.

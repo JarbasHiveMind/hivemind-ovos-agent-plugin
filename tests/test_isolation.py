@@ -37,6 +37,19 @@ class TestClientIsolation:
         bob.send.assert_called_once()
         carol.send.assert_not_called()
 
+    def test_stale_client_send_does_not_break_sibling_delivery(self, agent, make_client):
+        alice = make_client("ws://alice")
+        alice.send.side_effect = ConnectionError("closed")
+        bob = make_client("ws://bob")
+        agent.hm_protocol.clients = {"ws://alice": alice, "ws://bob": bob}
+
+        agent.handle_internal_mycroft(
+            _ovos_internal("speak", destination=["ws://alice", "ws://bob"])
+        )
+
+        alice.send.assert_called_once()
+        bob.send.assert_called_once()
+
     def test_message_with_no_destination_is_dropped(self, agent, make_client):
         alice = make_client("ws://alice")
         bob = make_client("ws://bob")
