@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.4.1a1) (2026-09-10)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.4.0a1...0.4.1a1)
+
+**Merged pull requests:**
+
+- fix: guard downstream sends to stale clients [\#59](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/59) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
 ## [0.4.0a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.4.0a1) (2026-09-03)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.3.10a1...0.4.0a1)
