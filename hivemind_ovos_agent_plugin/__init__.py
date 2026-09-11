@@ -349,25 +349,53 @@ class OVOSAgentProtocol(AgentProtocol):
                     log.debug("%s - destination is not a peer: %s",
                               message.msg_type, peer)
 
-        # Session-ownership delivery: a hub bus message replaying a connected
-        # client's session must reach that client even when destination does
-        # not name its CURRENT peer id. Peer ids are per-message NAT-assigned
-        # and do not survive a satellite reconnect, so a satellite-scheduled
-        # event (e.g. an alarm firing later) carries the client's session but a
-        # stale/absent peer id and the peer-id path above drops it. Ownership
-        # keys on the client's durable, identity-derived session_namespace
-        # (hub-salted, non-secret) which survives a reconnect -- conn_nonce
-        # would not, so a session minted before a reconnect would lose its
-        # route. The session is the durable path back to the client.
+        # Origin delivery: a hub bus message that replays a connected client's
+        # exchange must reach that client even when destination does not name
+        # it. A skill reply is the common case, and a satellite-scheduled event
+        # firing later is the awkward one, because the connection that
+        # scheduled it may be gone by then.
         session = message.context.get("session")
         sid = session.get("session_id") if isinstance(session, dict) else None
-        if isinstance(sid, str):
-            for peer, client in connected:
-                if peer in delivered:
-                    continue
-                namespace = getattr(client, "session_namespace", None)
-                if not (namespace and sid.startswith(f"{namespace}:")):
-                    continue
+        origin = message.context.get("peer")
+        if isinstance(sid, str) or isinstance(origin, str):
+            # hivemind-core stamps the originating connection on every
+            # message it forwards to the OVOS bus: context["peer"] is
+            # client.peer, and the hub's client registry is keyed by that same
+            # string. Message.reply and Message.forward deep-copy the context
+            # and leave "peer" untouched, so a skill's reply still names the
+            # connection that asked. That is the only value here that is stable
+            # for one connection and different between two connections sharing
+            # a credential: core mints an eight-hex suffix when two connections
+            # would otherwise claim one peer id.
+            #
+            # The session id cannot do this job. Its namespace half is derived
+            # from the access key, so two devices at one site on one credential
+            # share it by design, and matching on it delivers one device's
+            # response to both, which AGENT-1 §3.2 forbids.
+            #
+            # The namespace remains the fallback, and only the fallback: a
+            # scheduled event replayed after a reconnect carries the peer id of
+            # a connection that no longer exists, and the namespace is the one
+            # route left to it. It is announced rather than silent, because a
+            # fan-out to every device on a key is something an operator has to
+            # be able to see in the log.
+            owners = ([(peer, client) for peer, client in connected
+                       if peer not in delivered and peer == origin]
+                      if isinstance(origin, str) else [])
+            by_namespace = False
+            if owners:
+                candidates = owners
+            elif isinstance(sid, str):
+                candidates = [(peer, client) for peer, client in connected
+                              if peer not in delivered
+                              and (getattr(client, "session_namespace", None)
+                                   and sid.startswith(
+                                       f"{client.session_namespace}:"))]
+                by_namespace = bool(candidates)
+            else:
+                candidates = []
+            fanned_out = []
+            for peer, client in candidates:
                 # ACL posture: the peer-id path above is explicit hub-decided
                 # direct addressing (destination names this exact live
                 # connection) and is trusted as-is -- allowed_types is a
@@ -381,6 +409,7 @@ class OVOSAgentProtocol(AgentProtocol):
                 if not self._type_allowed(message.msg_type, client):
                     continue
                 delivered.add(peer)
+                fanned_out.append(peer)
                 log.debug("%s - session-owned delivery to %s",
                           message.msg_type, peer)
                 message.context["source"] = "hive"
@@ -392,6 +421,18 @@ class OVOSAgentProtocol(AgentProtocol):
                     payload=payload,
                 )
                 self._safe_send(client, msg, peer)
+
+            # Announced after the loop and from the peers actually sent to, not
+            # from the candidate list: a candidate can still be dropped by the
+            # allowed_types gate below, so a count taken before delivery
+            # describes an intention rather than a fan-out. An operator reading
+            # this line is being told how many devices received a message that
+            # was not addressed to them, and that number has to be the real one.
+            if by_namespace and fanned_out:
+                log.info(
+                    "%s - session %s has no live owner; delivered to %d client(s) "
+                    "by the site-and-key namespace: %s",
+                    message.msg_type, sid, len(fanned_out), ", ".join(fanned_out))
 
     def _client_allowed_types(self, client) -> list:
         """Resolve a client's allowed message types, DB row winning.
