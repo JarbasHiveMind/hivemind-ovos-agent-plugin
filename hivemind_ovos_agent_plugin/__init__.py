@@ -5,7 +5,6 @@ from collections.abc import Iterator
 from typing import Any
 
 from hivemind_bus_client.message import HiveMessage, HiveMessageType
-from ovos_spec_tools import migration_counterpart
 from hivemind_plugin_manager.protocols import AgentProtocol
 from ovos_bus_client import MessageBusClient
 from ovos_bus_client.message import Message
@@ -370,16 +369,13 @@ class OVOSAgentProtocol(AgentProtocol):
                     continue
                 # ACL posture: the peer-id path above is explicit hub-decided
                 # direct addressing (destination names this exact live
-                # connection) and is trusted as-is -- allowed_types is a
-                # send/receive contract, NOT an exhaustive receive filter, so
-                # e.g. ovos.intent.unmatched still reaches peers over that
-                # trusted path regardless of allowed_types. Session-ownership
-                # delivery is INFERRED from the client owning the session, so
-                # only this inferred path is gated deny-by-default by the
-                # client's declared allowed_types -- forwarding only message
-                # types the client admits.
-                if not self._type_allowed(message.msg_type, client):
-                    continue
+                # connection). Session-ownership delivery is INFERRED from the
+                # client owning the session. Both paths carry the master's
+                # own traffic back to a satellite the master itself serves,
+                # so neither gates on allowed_types: the trust model grants
+                # the master unconditional say over what reaches its
+                # satellites, and a client's declared allowed_types is a
+                # contract over what it may SEND upward.
                 delivered.add(peer)
                 log.debug("%s - session-owned delivery to %s",
                           message.msg_type, peer)
@@ -392,45 +388,6 @@ class OVOSAgentProtocol(AgentProtocol):
                     payload=payload,
                 )
                 self._safe_send(client, msg, peer)
-
-    def _client_allowed_types(self, client) -> list:
-        """Resolve a client's allowed message types, DB row winning.
-
-        Mirrors hivemind-core's MessageTypeACLPolicy._allowed_types: the live
-        DB row takes precedence so a grant/revocation applies without a
-        reconnect; the connection-time snapshot (``client.allowed_types``) is
-        used only when no DB is reachable. Any lookup error yields an empty
-        list, which the deny-by-default caller treats as "forward nothing".
-        """
-        db = getattr(self.hm_protocol, "db", None) if self.hm_protocol else None
-        if db is None:
-            return list(getattr(client, "allowed_types", None) or [])
-        try:
-            user = client.resolve_user(db)
-        except Exception:  # noqa: BLE001
-            return []
-        if user is None:
-            return list(getattr(client, "allowed_types", None) or [])
-        return list(getattr(user, "allowed_types", None) or [])
-
-    def _type_allowed(self, msg_type: str, client) -> bool:
-        """Deny-by-default, twin-aware allowed_types admission.
-
-        The frame that actually arrives on the firehose is the canonical
-        ``ovos.*`` spelling; bus-client does not re-emit a frame under its
-        legacy twin. A satellite provisioned with the legacy spelling in
-        ``allowed_types`` would therefore never match the canonical frame. The
-        migration map (single lookup, no hardcoded type list) bridges the two:
-        an ``allowed_types`` entry admits EITHER spelling of a migrated pair.
-        Empty/unresolvable allowed_types forwards nothing.
-        """
-        allowed = self._client_allowed_types(client)
-        if not allowed:
-            return False
-        if msg_type in allowed:
-            return True
-        twin = migration_counterpart(msg_type)
-        return twin is not None and twin in allowed
 
 
 # back-compat alias for the old class name shipped from ovos-bus-client
