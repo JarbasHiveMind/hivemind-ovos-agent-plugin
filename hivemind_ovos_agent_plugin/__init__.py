@@ -251,7 +251,14 @@ class OVOSAgentProtocol(AgentProtocol):
         peer = message.data.get("peer")
         msg_type = message.data["msg_type"]
 
-        hmessage = HiveMessage(msg_type, payload=payload, target_peers=[peer])
+        # site_id is a routing key for BROADCAST only: the envelope goes to
+        # every connection and each node delivers it only when the site is its
+        # own (HIVEMIND-MSG-1 §5). The hub never selects recipients by site_id,
+        # because a client declares its own.
+        target_site_id = (message.data.get("target_site_id")
+                          if msg_type == HiveMessageType.BROADCAST else None)
+        hmessage = HiveMessage(msg_type, payload=payload, target_peers=[peer],
+                               target_site_id=target_site_id)
 
         if msg_type in [HiveMessageType.PROPAGATE, HiveMessageType.BROADCAST]:
             # snapshot: connect/disconnect mutate self.clients from another thread
@@ -348,6 +355,15 @@ class OVOSAgentProtocol(AgentProtocol):
                     log.debug("%s - destination is not a peer: %s",
                               message.msg_type, peer)
 
+        # A targeted bus message is delivered by peer id only, never by a
+        # site_id match. A client declares its own site_id in HELLO, so a
+        # site_id is a routing key, not an authorisation boundary: selecting
+        # recipients by it here would let a connection on another access key
+        # claim a site and receive that site's messages. Site-targeted
+        # delivery is a BROADCAST through hive.send.downstream, which every
+        # node filters by its own site (HIVEMIND-MSG-1 §5).
+        target_site_id = message.context.get("target_site_id")
+
         # Session-ownership delivery: a hub bus message replaying a connected
         # client's session must reach that client even when destination does
         # not name its CURRENT peer id. Peer ids are per-message NAT-assigned
@@ -388,6 +404,14 @@ class OVOSAgentProtocol(AgentProtocol):
                     payload=payload,
                 )
                 self._safe_send(client, msg, peer)
+
+        if target_site_id and not delivered:
+            # issue #52: this used to drop with no log at all
+            log.warning(
+                "%s - target_site_id %r does not address a bus message; "
+                "emit hive.send.downstream with msg_type broadcast and "
+                "target_site_id, or set destination to a peer id",
+                message.msg_type, target_site_id)
 
 
 # back-compat alias for the old class name shipped from ovos-bus-client
