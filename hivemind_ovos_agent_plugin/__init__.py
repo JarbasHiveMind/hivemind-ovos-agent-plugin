@@ -389,6 +389,31 @@ class OVOSAgentProtocol(AgentProtocol):
                 )
                 self._safe_send(client, msg, peer)
 
+        # Peer-stamp delivery: a skill that echoes the inbound context replies
+        # with context.peer naming this connection's live peer id and no
+        # destination and no namespaced session — the hub stamps
+        # context.peer = context.source = client.peer on every utterance it
+        # injects (handle_inject_agent_msg). The peer id is per-message and
+        # matches only the connection it was minted for, so an exact hit here
+        # is a route that could not name anyone else.
+        peer_stamp = message.context.get("peer")
+        if isinstance(peer_stamp, str) and peer_stamp not in delivered:
+            for peer, client in connected:
+                if peer == peer_stamp:
+                    log.debug("%s - peer-stamped delivery to %s",
+                              message.msg_type, peer)
+                    delivered.add(peer)
+                    message.context["source"] = "hive"
+                    payload = self._nat_outbound_session(message, client)
+                    msg = HiveMessage(
+                        HiveMessageType.BUS,
+                        source_peer=peer,
+                        target_peers=[peer],
+                        payload=payload,
+                    )
+                    self._safe_send(client, msg, peer)
+                    break
+
 
 # back-compat alias for the old class name shipped from ovos-bus-client
 OVOSProtocol = OVOSAgentProtocol

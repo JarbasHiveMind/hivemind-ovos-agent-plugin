@@ -186,3 +186,57 @@ def test_type_with_no_twin_still_delivered(agent, make_client):
     agent.handle_internal_mycroft(_msg("ovos.mic.listen", ["skills"], "NS:s1"))
 
     alice.send.assert_called_once()
+
+
+def _msg_ctx(msg_type, ctx):
+    return Message(msg_type, {}, ctx).serialize()
+
+
+def test_peer_context_routes_when_no_destination_no_session(agent, make_client):
+    """(peer) case B from utterance-routing-regression.md: a skill that emits
+    speak echoing only the hub-stamped context (peer names the live peer id)
+    and no destination and no session reaches the client the hub stamped.
+    Fail-before: the return path reads destination then session-ownership and
+    never context.peer, so this speak is dropped in silence."""
+    agent.hm_protocol.db = None
+    alice = _client(make_client, "HiveMessageBusClientV0.0.1::17::satellite_1::00000000-0000-0000-0000-000000000000",
+                    "NS", [])
+    agent.hm_protocol.clients = {alice.peer: alice}
+
+    agent.handle_internal_mycroft(_msg_ctx("speak", {
+        "source": "fake_skill.test", "peer": alice.peer,
+    }))
+
+    alice.send.assert_called_once()
+    sent = alice.send.call_args[0][0]
+    assert sent.payload.context["peer"] == alice.peer
+
+
+def test_stale_peer_context_is_inert(agent, make_client):
+    """(peer) case A from utterance-routing-regression.md: a stale peer uuid
+    in context.peer must NOT deliver to anyone."""
+    agent.hm_protocol.db = None
+    alice = _client(make_client, "HiveMessageBusClientV0.0.1::17::satellite_1::11111111-1111-1111-1111-111111111111",
+                    "NS", [])
+    agent.hm_protocol.clients = {alice.peer: alice}
+
+    agent.handle_internal_mycroft(_msg_ctx("speak", {
+        "source": "fake_skill.test",
+        "peer": "HiveMessageBusClientV0.0.1::17::satellite_1::00000000-0000-0000-0000-000000000000",
+        "session": {"session_id": "deadbeef:00000000-0000-0000-0000-000000000000"},
+    }))
+
+    alice.send.assert_not_called()
+
+
+def test_peer_context_does_not_cross_clients(agent, make_client):
+    """(peer) a peer-id that names nobody connected delivers to nobody."""
+    agent.hm_protocol.db = None
+    alice = _client(make_client, "ws://alice-here", "NS", [])
+    agent.hm_protocol.clients = {alice.peer: alice}
+
+    agent.handle_internal_mycroft(_msg_ctx("speak", {
+        "source": "fake_skill.test", "peer": "ws://gone",
+    }))
+
+    alice.send.assert_not_called()
