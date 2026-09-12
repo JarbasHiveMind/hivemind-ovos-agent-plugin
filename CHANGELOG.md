@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.2a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.4.2a1) (2026-09-12)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.4.1a1...0.4.2a1)
+
+**Merged pull requests:**
+
+- fix: remove the downward type gate from session-ownership delivery [\#63](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/63) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
 ## [0.4.1a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.4.1a1) (2026-09-10)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.4.0a1...0.4.1a1)
