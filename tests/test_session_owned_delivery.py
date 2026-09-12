@@ -6,9 +6,10 @@ peer ids are per-message NAT-assigned and do not survive a satellite reconnect,
 so a satellite-scheduled event replays the client's session but a stale/absent
 peer id. The session (namespaced as ``f"{session_namespace}:{declared}"``,
 where session_namespace is durable and survives a reconnect) is the durable
-route. This inferred path is deny-by-default gated on the client's declared
-``allowed_types`` contract (twin-aware for legacy/canonical spellings), unlike
-the explicit peer-id path.
+route. Delivery on this inferred path trusts the session owner: the master
+sends whatever the OVOS bus addressed to the satellites it serves, and
+``allowed_types`` gates only what a satellite sends upward, so nothing here
+reads it.
 """
 
 from types import SimpleNamespace
@@ -47,26 +48,50 @@ def test_session_owned_delivery_non_peer_destination(agent, make_client):
     assert sent.payload.context["session"]["session_id"] == "s1"
 
 
-def test_deny_by_default_type_not_allowed(agent, make_client):
-    """(b) msg_type not in allowed_types => not forwarded."""
+def test_no_utterance_type_not_allowed_still_delivered(agent, make_client):
+    """(b') a client allowed only recognizer_loop:utterance still receives a
+    speak replaying its session -- implicit trust downward; allowed_types
+    never gates master-to-satellite delivery. (fail-before for removing the
+    downward gate: the removed gate dropped this speak in silence.)"""
     agent.hm_protocol.db = None
-    alice = _client(make_client, "ws://alice", "NONCE", ["speak"])
+    alice = _client(make_client, "ws://alice", "NONCE",
+                    ["recognizer_loop:utterance"])
     agent.hm_protocol.clients = {"ws://alice": alice}
 
-    agent.handle_internal_mycroft(_msg("recognizer_loop:utterance", ["skills"], "NONCE:s1"))
+    agent.handle_internal_mycroft(_msg("speak", ["skills"], "NONCE:s1"))
 
-    alice.send.assert_not_called()
+    alice.send.assert_called_once()
+    sent = alice.send.call_args[0][0]
+    assert sent.payload.context["session"]["session_id"] == "s1"
 
 
-def test_deny_by_default_empty_allowed(agent, make_client):
-    """(b) empty allowed_types => not forwarded."""
+def test_hive_utterance_handled_reaches_minimal_client(agent, make_client):
+    """(b'') the post-intent replies a present satellite needs
+    (ovos.utterance.handled, ovos.intent.unmatched under canonical spellings)
+    reach a client allowing only the legacy utterance topic; there is no
+    receive-side deny path left for master-originated traffic."""
+    agent.hm_protocol.db = None
+    alice = _client(make_client, "ws://alice", "NONCE",
+                    ["recognizer_loop:utterance"])
+    agent.hm_protocol.clients = {"ws://alice": alice}
+
+    for mt in ("ovos.utterance.handled", "ovos.intent.unmatched"):
+        alice.send.reset_mock()
+        agent.handle_internal_mycroft(_msg(mt, ["skills"], "NONCE:s1"))
+        alice.send.assert_called_once()
+
+
+def test_empty_allowed_still_delivers(agent, make_client):
+    """(b) empty allowed_types does not block session-owned delivery."""
     agent.hm_protocol.db = None
     alice = _client(make_client, "ws://alice", "NONCE", [])
     agent.hm_protocol.clients = {"ws://alice": alice}
 
     agent.handle_internal_mycroft(_msg("speak", ["skills"], "NONCE:s1"))
 
-    alice.send.assert_not_called()
+    alice.send.assert_called_once()
+    sent = alice.send.call_args[0][0]
+    assert sent.payload.context["session"]["session_id"] == "s1"
 
 
 def test_double_send_guard(agent, make_client):
@@ -137,10 +162,11 @@ def test_delivery_survives_reconnect_durable_namespace(agent, make_client):
     assert sent.payload.context["session"]["session_id"] == "s1"
 
 
-def test_twin_aware_legacy_allowed_admits_canonical_frame(agent, make_client):
-    """(twin) a satellite provisioned with the LEGACY spelling "speak" in
-    allowed_types receives the CANONICAL frame ovos.utterance.speak that
-    actually arrives on the firehose."""
+def test_canonical_frame_reaches_legacy_allowed_client(agent, make_client):
+    """(twin) the CANONICAL frame ovos.utterance.speak that actually arrives
+    on the firehose reaches a satellite provisioned with the LEGACY spelling
+    "speak". (Under the removed gate this passed only because the gate
+    matched twins; now no gate stands and delivery is unconditional.)"""
     agent.hm_protocol.db = None
     alice = _client(make_client, "ws://alice", "NS", ["speak"])
     agent.hm_protocol.clients = {"ws://alice": alice}
@@ -150,12 +176,13 @@ def test_twin_aware_legacy_allowed_admits_canonical_frame(agent, make_client):
     alice.send.assert_called_once()
 
 
-def test_twin_aware_genuinely_not_allowed_still_denied(agent, make_client):
-    """(twin) a type with no twin in allowed_types is still denied."""
+def test_type_with_no_twin_still_delivered(agent, make_client):
+    """(twin) a type with no relation to allowed_types is still delivered:
+    downward delivery reads only session ownership."""
     agent.hm_protocol.db = None
     alice = _client(make_client, "ws://alice", "NS", ["speak"])
     agent.hm_protocol.clients = {"ws://alice": alice}
 
     agent.handle_internal_mycroft(_msg("ovos.mic.listen", ["skills"], "NS:s1"))
 
-    alice.send.assert_not_called()
+    alice.send.assert_called_once()

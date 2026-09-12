@@ -49,6 +49,8 @@ If `db` is unavailable, the client lookup fails, or the user record is absent, t
 
 `hivemind-core` does not consult `message_blacklist`. It dropped outbound message blacklisting in favor of a whitelist-only model (`allowed_types`), so the admission chain has no consumer for a message-type blacklist.
 
+`allowed_types` reads as the send/receive contract a client declares for what it may send upward. It never gates what the master sends down to a satellite: the trust model grants the master unconditional say over the replies and events that reach the satellites it serves. The delivery paths in `hivemind_ovos_agent_plugin/__init__.py` (explicit peer-id and inferred session-ownership) therefore read no `allowed_types` at all.
+
 ## All-at-once import
 
 The package top level re-exports all five mutation classes and `OVOSAgentPolicy` (`hivemind_ovos_agent_plugin/__init__.py:14-20`):
