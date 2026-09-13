@@ -251,12 +251,13 @@ class OVOSAgentProtocol(AgentProtocol):
         peer = message.data.get("peer")
         msg_type = message.data["msg_type"]
 
-        # site_id is a routing key for BROADCAST only: the envelope goes to
-        # every connection and each node delivers it only when the site is its
-        # own (HIVEMIND-MSG-1 §5). The hub never selects recipients by site_id,
-        # because a client declares its own.
+        # site_id is a routing key for the flood types BROADCAST and PROPAGATE:
+        # the envelope goes to every connection and each node delivers it only
+        # when the site is its own (HIVEMIND-MSG-1 §5). The hub never selects
+        # recipients by site_id, because a client declares its own.
         target_site_id = (message.data.get("target_site_id")
-                          if msg_type == HiveMessageType.BROADCAST else None)
+                          if msg_type in (HiveMessageType.BROADCAST,
+                                          HiveMessageType.PROPAGATE) else None)
         hmessage = HiveMessage(msg_type, payload=payload, target_peers=[peer],
                                target_site_id=target_site_id)
 

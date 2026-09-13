@@ -100,6 +100,38 @@ def test_a_site_broadcast_reaches_every_connection_with_the_site_on_the_envelope
         assert sent.target_site_id == "kitchen"
 
 
+def test_a_site_propagate_reaches_every_connection_with_the_site_on_the_envelope(
+        agent, make_client):
+    """fail-before: handle_send dropped target_site_id for PROPAGATE, so the
+    node filter (site == own site) delivered the inner message nowhere."""
+    kitchen, spoofer = _kitchen_and_spoofer(agent, make_client)
+    bedroom = _client(make_client, "bedroom::0b0b", "bedroom")
+    agent.hm_protocol.clients["bedroom::0b0b"] = bedroom
+    inner = HiveMessage(HiveMessageType.BUS, payload=Message("speak", {}))
+
+    agent.handle_send(_downstream(HiveMessageType.PROPAGATE, inner,
+                                  target_site_id="kitchen"))
+
+    for client in (kitchen, spoofer, bedroom):
+        client.send.assert_called_once()
+        sent = client.send.call_args[0][0]
+        assert sent.msg_type == HiveMessageType.PROPAGATE
+        # the flood selects no recipient; each node filters by its own site
+        assert sent.target_site_id == "kitchen"
+
+
+def test_a_site_escalate_downstream_sends_nothing(agent, make_client):
+    kitchen, spoofer = _kitchen_and_spoofer(agent, make_client)
+
+    agent.handle_send(_downstream(HiveMessageType.ESCALATE,
+                                  HiveMessage(HiveMessageType.BUS,
+                                              payload=Message("speak", {})),
+                                  target_site_id="kitchen"))
+
+    kitchen.send.assert_not_called()
+    spoofer.send.assert_not_called()
+
+
 def test_a_bus_send_with_only_a_site_sends_nothing(agent, make_client):
     kitchen, spoofer = _kitchen_and_spoofer(agent, make_client)
 
