@@ -321,6 +321,10 @@ class OVOSAgentProtocol(AgentProtocol):
         connected = list(self.clients.items())
         log = _forward_logger()
         delivered = set()
+        session = message.context.get("session")
+        sid = session.get("session_id") if isinstance(session, dict) else None
+        in_session = f" (session {sid})" if isinstance(sid, str) else ""
+        warned = False
 
         if target_peers:
             unmatched = set(target_peers)
@@ -340,54 +344,40 @@ class OVOSAgentProtocol(AgentProtocol):
                     self._safe_send(client, msg, peer)
             for peer in unmatched:
                 if _is_peer_id(peer):
-                    log.warning("%s - destination peer not connected: %s",
-                                message.msg_type, peer)
+                    # HIVEMIND-AGENT-1 §3.3: name the destination that could
+                    # not be resolved, and the session.
+                    log.warning("%s - destination peer not connected: %s; "
+                                "response dropped%s",
+                                message.msg_type, peer, in_session)
+                    warned = True
                 else:
                     # The common case: OVOS routes to service names such as
                     # "audio" or "skills", so every such message reaches here.
                     log.debug("%s - destination is not a peer: %s",
                               message.msg_type, peer)
 
-        # Session-ownership delivery: a hub bus message replaying a connected
-        # client's session must reach that client even when destination does
-        # not name its CURRENT peer id. Peer ids are per-message NAT-assigned
-        # and do not survive a satellite reconnect, so a satellite-scheduled
-        # event (e.g. an alarm firing later) carries the client's session but a
-        # stale/absent peer id and the peer-id path above drops it. Ownership
-        # keys on the client's durable, identity-derived session_namespace
-        # (hub-salted, non-secret) which survives a reconnect -- conn_nonce
-        # would not, so a session minted before a reconnect would lose its
-        # route. The session is the durable path back to the client.
-        session = message.context.get("session")
-        sid = session.get("session_id") if isinstance(session, dict) else None
-        if isinstance(sid, str):
-            for peer, client in connected:
-                if peer in delivered:
-                    continue
-                namespace = getattr(client, "session_namespace", None)
-                if not (namespace and sid.startswith(f"{namespace}:")):
-                    continue
-                # ACL posture: the peer-id path above is explicit hub-decided
-                # direct addressing (destination names this exact live
-                # connection). Session-ownership delivery is INFERRED from the
-                # client owning the session. Both paths carry the master's
-                # own traffic back to a satellite the master itself serves,
-                # so neither gates on allowed_types: the trust model grants
-                # the master unconditional say over what reaches its
-                # satellites, and a client's declared allowed_types is a
-                # contract over what it may SEND upward.
-                delivered.add(peer)
-                log.debug("%s - session-owned delivery to %s",
-                          message.msg_type, peer)
-                message.context["source"] = "hive"
-                payload = self._nat_outbound_session(message, client)
-                msg = HiveMessage(
-                    HiveMessageType.BUS,
-                    source_peer=peer,
-                    target_peers=[peer],
-                    payload=payload,
-                )
-                self._safe_send(client, msg, peer)
+        # HIVEMIND-AGENT-1 §3.2: a response is delivered only to the peers its
+        # Layer-1 destination names, and one that names no peer of this server
+        # is delivered to no peer. §3.3: no other identity selects a receiver
+        # -- not context["peer"], not a shared session namespace, credential or
+        # site. A backend that does not stamp destination with the peer is
+        # non-conformant (§3.2); this server does not guess for it.
+        #
+        # context["peer"] is used only to recognise a response to a peer, so
+        # that its loss is logged at WARNING (§3.3) while hub traffic addressed
+        # to services with no peer behind it stays at debug above.
+        #
+        # hivemind-core stamps context["peer"] and context["source"] with the
+        # same client id on every message it forwards to this bus. The request
+        # itself, and anything forwarded from it, therefore still has
+        # source == peer and is not a response; without this check every
+        # utterance would log a false WARNING on its way to the skills.
+        peer = message.context.get("peer")
+        if (not delivered and not warned and isinstance(peer, str)
+                and message.context.get("source") != peer):
+            log.warning("%s - destination %s names no connected peer; "
+                        "response delivered to no peer%s",
+                        message.msg_type, target_peers, in_session)
 
 
 # back-compat alias for the old class name shipped from ovos-bus-client
