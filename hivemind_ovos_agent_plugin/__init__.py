@@ -250,8 +250,22 @@ class OVOSAgentProtocol(AgentProtocol):
         payload = message.data.get("payload")
         peer = message.data.get("peer")
         msg_type = message.data["msg_type"]
+        # HIVEMIND-MSG-1 §4: a BROADCAST, PROPAGATE or ESCALATE carrying
+        # target_site_id travels the mesh under the rules of its outer type,
+        # and only a node whose own site identifier is equal delivers the
+        # inner BUS message to its Layer-1 bus. An unset key means no node
+        # delivers it, so a caller that wants a site must be able to name one.
+        # The same clause forbids selecting a BUS recipient by a site
+        # identifier, so the key goes on the routed types only. A receiver
+        # must ignore it on a directly addressed BUS frame anyway; not
+        # setting it there keeps this side from looking like site-addressed
+        # BUS delivery, which is the shape the clause refuses.
+        routed = msg_type in (HiveMessageType.PROPAGATE, HiveMessageType.BROADCAST,
+                              HiveMessageType.ESCALATE)
+        site_id = message.data.get("site_id") if routed else None
 
-        hmessage = HiveMessage(msg_type, payload=payload, target_peers=[peer])
+        hmessage = HiveMessage(msg_type, payload=payload, target_peers=[peer],
+                               target_site_id=site_id)
 
         if msg_type in [HiveMessageType.PROPAGATE, HiveMessageType.BROADCAST]:
             # snapshot: connect/disconnect mutate self.clients from another thread
@@ -388,6 +402,32 @@ class OVOSAgentProtocol(AgentProtocol):
                     payload=payload,
                 )
                 self._safe_send(client, msg, peer)
+
+        # A message that names a site and no peer reaches neither path above:
+        # the peer ids do not match and no client owns the session. It used to
+        # return here with nothing written, so the sender saw a message leave
+        # the bus and land nowhere, with no way to tell that from a delivery.
+        # Site targeting downstream is not this function's job — it belongs on
+        # a routed envelope through hive.send.downstream (HIVEMIND-MSG-1 §4) —
+        # but a drop that nobody can see costs the next person the same
+        # guesswork.
+        if not delivered and connected:
+            site = session.get("site_id") if isinstance(session, dict) else None
+            if site:
+                log.info(
+                    "%s - not delivered: it names site %s, and downstream site "
+                    "targeting goes on a routed envelope (hive.send.downstream "
+                    "with msg_type BROADCAST or PROPAGATE and site_id), not on "
+                    "a bus message's destination",
+                    message.msg_type, site)
+            elif not target_peers:
+                # A non-empty destination was already explained per entry by
+                # the unmatched loop above; this is the case with nothing in
+                # the destination at all, which said nothing until now.
+                log.debug("%s - not delivered to any of the %d connected "
+                          "clients: no destination, and no client owns "
+                          "session %s",
+                          message.msg_type, len(connected), sid or "(none)")
 
 
 # back-compat alias for the old class name shipped from ovos-bus-client
