@@ -1,4 +1,4 @@
-"""Downstream site targeting, the shape HIVEMIND-MSG-1 §4 defines.
+"""Downstream site targeting, the shape HIVEMIND-MSG-1 §5 defines.
 
 A `BROADCAST`, `PROPAGATE` or `ESCALATE` carrying `target_site_id` travels
 the mesh under the rules of its outer type, and only a node whose own site

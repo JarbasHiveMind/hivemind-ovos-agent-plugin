@@ -250,7 +250,7 @@ class OVOSAgentProtocol(AgentProtocol):
         payload = message.data.get("payload")
         peer = message.data.get("peer")
         msg_type = message.data["msg_type"]
-        # HIVEMIND-MSG-1 §4: a BROADCAST, PROPAGATE or ESCALATE carrying
+        # HIVEMIND-MSG-1 §5: a BROADCAST, PROPAGATE or ESCALATE carrying
         # target_site_id travels the mesh under the rules of its outer type,
         # and only a node whose own site identifier is equal delivers the
         # inner BUS message to its Layer-1 bus. An unset key means no node
@@ -408,7 +408,7 @@ class OVOSAgentProtocol(AgentProtocol):
         # return here with nothing written, so the sender saw a message leave
         # the bus and land nowhere, with no way to tell that from a delivery.
         # Site targeting downstream is not this function's job — it belongs on
-        # a routed envelope through hive.send.downstream (HIVEMIND-MSG-1 §4) —
+        # a routed envelope through hive.send.downstream (HIVEMIND-MSG-1 §5) —
         # but a drop that nobody can see costs the next person the same
         # guesswork.
         if not delivered and connected:
