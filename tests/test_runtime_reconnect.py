@@ -858,3 +858,45 @@ def test_websocket_filter_installation_is_idempotent(monkeypatch):
         isinstance(item, _TransientWebsocketDisconnectFilter)
         for item in logger.filters
     ) == 1
+
+
+def test_a_transient_probe_failure_spends_the_recovery_window(monkeypatch):
+    """A raising probe is the condition the window exists for, not an exit.
+
+    `_probe_delivery_once` emits, so it raises whatever a send raises. Letting
+    a `ConnectionError` escape returned control to the caller before the
+    bounded recovery had been used at all -- the opposite of what the deadline
+    is for.
+    """
+    client = _client()
+    probe = MagicMock(side_effect=[
+        ConnectionError("bus closed while sending"),
+        TimeoutError("frame write remained blocked"),
+        True,
+    ])
+    reconnect = MagicMock()
+    monkeypatch.setattr(client, "_probe_delivery_once", probe)
+    monkeypatch.setattr(client, "_schedule_reconnect", reconnect)
+    monkeypatch.setattr(client, "_wait_for_live_transport", MagicMock(
+        return_value=True
+    ))
+
+    client.ensure_delivery_path(0.01)
+
+    assert probe.call_count == 3
+    reconnect.assert_called_once()
+
+
+def test_a_probe_failure_that_is_not_transient_still_surfaces(monkeypatch):
+    """Only the stale-path failures are absorbed; everything else is the caller's."""
+    client = _client()
+    monkeypatch.setattr(client, "_probe_delivery_once", MagicMock(
+        side_effect=ValueError("probe is misconfigured")
+    ))
+    monkeypatch.setattr(client, "_schedule_reconnect", MagicMock())
+    monkeypatch.setattr(client, "_wait_for_live_transport", MagicMock(
+        return_value=True
+    ))
+
+    with pytest.raises(ValueError, match="misconfigured"):
+        client.ensure_delivery_path(0.01)

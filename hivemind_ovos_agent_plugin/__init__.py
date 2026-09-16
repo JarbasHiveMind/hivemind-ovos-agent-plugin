@@ -314,8 +314,15 @@ class _RuntimeMessageBusClient(MessageBusClient):
                             self.emitter.remove_listener(
                                 installed_type, installed_callback
                             )
-                        except Exception:
-                            pass
+                        except Exception as rollback_error:
+                            # Best effort: the original failure is what the
+                            # caller needs, and masking it with a rollback
+                            # error would lose it. Silence hid the case where
+                            # rollback left a listener behind, so say so.
+                            LOG.debug(
+                                "Could not roll back query receipt listener "
+                                "%s: %s", installed_type, rollback_error
+                            )
                     raise
                 installed.append((response_type, callback))
             self._query_receipt_dispatchers = dict(installed)
@@ -613,6 +620,18 @@ class _RuntimeMessageBusClient(MessageBusClient):
                 if lock_acquired:
                     self._send_lock.release()
 
+    def _is_recoverable_delivery_error(self, error):
+        """A send failure the bounded delivery loops should retry, not surface.
+
+        ``_send`` turns a transient disconnect into ``ConnectionError``, and a
+        write that stays blocked past the send timeout into ``TimeoutError``.
+        Both describe the stale path these loops exist to replace, so letting
+        either escape skips the recovery the caller asked for. Anything else is
+        the caller's problem and must not be swallowed.
+        """
+        return (isinstance(error, (ConnectionError, TimeoutError))
+                or self._is_transient_disconnect(error))
+
     def _probe_delivery_once(self, timeout):
         """Prove the OVOS intent service consumed and answered one probe."""
         probe_id = uuid.uuid4().hex
@@ -683,7 +702,25 @@ class _RuntimeMessageBusClient(MessageBusClient):
                             f"{recovery_timeout:.1f}-second delivery window"
                         )
                     received.clear()
-                    self.emit(request)
+                    try:
+                        self.emit(request)
+                    except Exception as error:
+                        # Same reasoning as the probe loop: a transient send
+                        # failure is what the shared deadline is for, and
+                        # raising here spent none of it.
+                        if not self._is_recoverable_delivery_error(error):
+                            raise
+                        last_error = error
+                        if not reconnected:
+                            self._schedule_reconnect(error)
+                            reconnected = True
+                        # Wait for a live transport rather than spinning on a
+                        # send that fails the moment it is attempted.
+                        self._wait_for_live_transport(min(
+                            deadline,
+                            time.monotonic() + self._message_send_timeout,
+                        ))
+                        continue
                     remaining = deadline - time.monotonic()
                     if remaining > 0 and received.wait(min(timeout, remaining)):
                         break
@@ -743,13 +780,21 @@ class _RuntimeMessageBusClient(MessageBusClient):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
-            if self._probe_delivery_once(min(timeout, remaining)):
-                return
-
-            last_error = TimeoutError(
-                "OVOS intent service did not answer the delivery probe within "
-                f"{timeout:.1f} seconds"
-            )
+            try:
+                if self._probe_delivery_once(min(timeout, remaining)):
+                    return
+                last_error = TimeoutError(
+                    "OVOS intent service did not answer the delivery probe "
+                    f"within {timeout:.1f} seconds"
+                )
+            except Exception as error:
+                # The probe emits, so it raises whatever a send raises. A
+                # transient one is the very condition this loop is bounded for;
+                # letting it escape returned control to the caller before the
+                # recovery window had been used at all.
+                if not self._is_recoverable_delivery_error(error):
+                    raise
+                last_error = error
             if not reconnected:
                 self._schedule_reconnect(last_error)
                 reconnected = True
@@ -1305,8 +1350,15 @@ class OVOSAgentProtocol(AgentProtocol):
                 for event_name, callback in reversed(installed):
                     try:
                         bus.remove(event_name, callback)
-                    except Exception:
-                        pass
+                    except Exception as rollback_error:
+                        # Best effort, and deliberately not raised: the
+                        # original failure is the one worth surfacing. A
+                        # rollback that leaves a handler behind is worth a line
+                        # all the same.
+                        LOG.debug(
+                            "Could not roll back query dispatcher handler "
+                            "%s: %s", event_name, rollback_error
+                        )
                 raise
             self._query_dispatcher_handlers[bus_id] = registrations
             self._query_dispatcher_buses.add(bus_id)
