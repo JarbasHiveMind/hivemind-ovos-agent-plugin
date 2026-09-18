@@ -99,8 +99,31 @@ class TestTheDropIsNoLongerSilent:
     def _text(call_list):
         return " ".join(str(a) for call in call_list for a in call[0])
 
-    def test_a_message_naming_a_site_says_where_site_targeting_lives(
+    def test_a_message_naming_a_target_site_says_where_site_targeting_lives(
             self, agent, make_client, monkeypatch):
+        """The issue #52 shape: a target_site_id in the context and no
+        destination. Before this, the explainer read the session's site_id
+        and this message left no line at INFO."""
+        log = self._capture(monkeypatch)
+        client = make_client("ws://a")
+        client.session_namespace = "ns"
+        agent.hm_protocol.clients = {"ws://a": client}
+        message = Message("my.skill.request", {},
+                          {"target_site_id": "kitchen",
+                           "session": {"session_id": "other"}})
+
+        agent.handle_internal_mycroft(message.serialize())
+
+        client.send.assert_not_called()
+        text = self._text(log.info.call_args_list)
+        assert "kitchen" in text
+        assert "hive.send.downstream" in text
+
+    def test_the_sessions_own_site_is_not_a_target(
+            self, agent, make_client, monkeypatch):
+        """A session that carries a site_id is the origin of the message.
+        With no target_site_id it is the plain undelivered case, at DEBUG,
+        and the INFO explainer must not name the origin as a target."""
         log = self._capture(monkeypatch)
         client = make_client("ws://a")
         client.session_namespace = "ns"
@@ -112,9 +135,8 @@ class TestTheDropIsNoLongerSilent:
         agent.handle_internal_mycroft(message.serialize())
 
         client.send.assert_not_called()
-        text = self._text(log.info.call_args_list)
-        assert "garage" in text
-        assert "hive.send.downstream" in text
+        log.info.assert_not_called()
+        assert "not delivered" in self._text(log.debug.call_args_list)
 
     def test_an_empty_destination_says_why_at_debug(
             self, agent, make_client, monkeypatch):

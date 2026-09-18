@@ -403,16 +403,18 @@ class OVOSAgentProtocol(AgentProtocol):
                 )
                 self._safe_send(client, msg, peer)
 
-        # A message that names a site and no peer reaches neither path above:
-        # the peer ids do not match and no client owns the session. It used to
-        # return here with nothing written, so the sender saw a message leave
-        # the bus and land nowhere, with no way to tell that from a delivery.
-        # Site targeting downstream is not this function's job — it belongs on
-        # a routed envelope through hive.send.downstream (HIVEMIND-MSG-1 §5) —
-        # but a drop that nobody can see costs the next person the same
-        # guesswork.
+        # A message that names a target site and no peer reaches neither path
+        # above: the peer ids do not match and no client owns the session. It
+        # used to return here with nothing written, so the sender saw a
+        # message leave the bus and land nowhere, with no way to tell that
+        # from a delivery. Site targeting downstream is not this function's
+        # job — it belongs on a routed envelope through hive.send.downstream
+        # (HIVEMIND-MSG-1 §5) — but a drop that nobody can see costs the next
+        # person the same guesswork. The key read is context["target_site_id"],
+        # the one a sender sets (issue #52); the session's own site_id is the
+        # origin of the message, not a target, and says nothing about intent.
         if not delivered and connected:
-            site = session.get("site_id") if isinstance(session, dict) else None
+            site = message.context.get("target_site_id")
             if site:
                 log.info(
                     "%s - not delivered: it names site %s, and downstream site "
