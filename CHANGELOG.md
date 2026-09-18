@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.5.0a1) (2026-09-18)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.4.3a1...0.5.0a1)
+
+**Merged pull requests:**
+
+- feat: carry a site identifier downstream, and say when nothing lands [\#67](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/67) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
 ## [0.4.3a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.4.3a1) (2026-09-18)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.4.2a1...0.4.3a1)
