@@ -1,8 +1,8 @@
 from unittest.mock import MagicMock
 
 import pytest
-from ovos_utils.fakebus import FakeBus
 from hivemind_plugin_manager.protocols import ClientCallbacks
+from ovos_utils.fakebus import FakeBus
 
 from hivemind_ovos_agent_plugin import OVOSAgentProtocol
 
@@ -33,6 +33,7 @@ def agent(fake_bus):
     plugin = OVOSAgentProtocol.__new__(OVOSAgentProtocol)
     plugin.bus = fake_bus
     plugin.config = {}
+    plugin._owned_bus = None
     plugin.hm_protocol = MagicMock()
     plugin.hm_protocol.clients = {}
     plugin.callbacks = ClientCallbacks()
