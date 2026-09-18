@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.3a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.4.3a1) (2026-09-18)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.4.2a1...0.4.3a1)
+
+**Merged pull requests:**
+
+- fix: deliver a hub response only to the peers its destination names [\#65](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/65) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
 ## [0.4.2a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.4.2a1) (2026-09-12)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.4.1a1...0.4.2a1)
