@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.5.1a1) (2026-09-28)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.5.0a1...0.5.1a1)
+
+**Merged pull requests:**
+
+- fix: a request is never delivered to a peer, whatever its destination says [\#73](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/73) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
 ## [0.5.0a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.5.0a1) (2026-09-18)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.4.3a1...0.5.0a1)
