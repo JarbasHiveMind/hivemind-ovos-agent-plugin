@@ -1,5 +1,10 @@
 """Verify the plugin registers the expected handlers on the OVOS bus."""
 
+import time
+from unittest.mock import MagicMock
+
+import pytest
+
 from hivemind_ovos_agent_plugin import OVOSAgentProtocol
 
 
@@ -18,3 +23,68 @@ class TestBusRegistration:
     def test_bus_field_is_kept(self, agent, fake_bus):
         """The bus the plugin operates on is the one we wired in."""
         assert agent.bus is fake_bus
+
+    def test_get_bus_returns_connected_owned_bus(self, agent):
+        bus = MagicMock()
+        bus.connected_event.is_set.return_value = True
+        agent.bus = agent._owned_bus = bus
+
+        assert agent.get_bus(MagicMock()) is bus
+
+        bus.connected_event.wait.assert_not_called()
+
+    def test_get_bus_returns_external_bus_untouched(self, agent):
+        owned_bus = MagicMock()
+        external_bus = MagicMock()
+        agent._owned_bus = owned_bus
+        agent.bus = external_bus
+
+        assert agent.get_bus(MagicMock()) is external_bus
+
+        external_bus.connected_event.wait.assert_not_called()
+        owned_bus.connected_event.wait.assert_not_called()
+
+    def test_get_bus_raises_at_once_when_owned_bus_is_disconnected(self, agent):
+        """Core calls get_bus on its IOLoop thread: it must not wait."""
+        bus = MagicMock()
+        bus.connected_event.is_set.return_value = False
+        agent.bus = agent._owned_bus = bus
+        agent.config["connection_timeout"] = 30
+
+        start = time.monotonic()
+        with pytest.raises(ConnectionError):
+            agent.get_bus()
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 0.5, f"get_bus blocked for {elapsed:.2f}s"
+        bus.connected_event.wait.assert_not_called()
+        bus.close.assert_not_called()
+
+    def test_get_bus_recovers_once_the_bus_reconnects(self, agent):
+        bus = MagicMock()
+        bus.connected_event.is_set.return_value = False
+        agent.bus = agent._owned_bus = bus
+        with pytest.raises(ConnectionError):
+            agent.get_bus()
+
+        bus.connected_event.is_set.return_value = True
+        assert agent.get_bus() is bus
+
+    def test_wait_for_bus_waits_on_the_owned_bus(self, agent):
+        bus = MagicMock()
+        bus.connected_event.wait.return_value = True
+        agent.bus = agent._owned_bus = bus
+        agent.config["connection_timeout"] = 3
+
+        assert agent.wait_for_bus() is True
+
+        bus.connected_event.wait.assert_called_once_with(3.0)
+
+    def test_wait_for_bus_ignores_external_buses(self, agent):
+        external_bus = MagicMock()
+        agent._owned_bus = MagicMock()
+        agent.bus = external_bus
+
+        assert agent.wait_for_bus() is True
+
+        external_bus.connected_event.wait.assert_not_called()

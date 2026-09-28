@@ -12,5 +12,16 @@ jobs:
       python_version: '3.11'
       coverage_source: 'hivemind_ovos_agent_plugin'
       test_path: 'tests/'
-      install_extras: 'test'
+      # install_extras intentionally unset — the upstream workflow's
+      # `.[dev]` first-attempt path covers our test deps via the dev
+      # extras alias in pyproject.toml. Setting `install_extras: 'test'`
+      # triggers a buggy `pip install test` literal in gh-automations
+      # that tries to install a PyPI package named "test".
       min_coverage: 0
+      # No pre_install_pip: hivescope (and the hivemind-core it drags in)
+      # moved out of the `dev`/`test` extras — every published hivemind-core
+      # still caps hivemind-bus-client<1.0.0, which is unresolvable against
+      # this package's own >=1.0.0a1 floor (see pyproject.toml `test` extra
+      # comment). The hivescope-backed tests self-skip without it installed.
+      # Re-add a pin here (matching the `e2e` extra) once hivemind-core
+      # publishes a >=1.0.0a1-compatible release.

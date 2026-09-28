@@ -1,0 +1,23 @@
+name: Integration Tests (live OVOS)
+
+# Live-OVOS e2e: ovoscope/MiniCroft runs a real OVOS skill through the intent
+# pipeline. Heavy, so it lives outside the fast build_tests.
+on:
+  pull_request:
+    branches: [dev, master]
+  workflow_dispatch:
+
+jobs:
+  ovoscope:
+    uses: OpenVoiceOS/gh-automations/.github/workflows/build-tests.yml@dev
+    with:
+      python_versions: '["3.11"]'
+      system_deps: 'python3-dev swig'
+      # hivescope lives in the opt-in `e2e` extra, not `test`: pulling it into
+      # the default install drags hivemind-core back in, and every published
+      # hivemind-core still caps hivemind-bus-client <1.0.0, which makes this
+      # package's own 1.x floor unsatisfiable. This job is the one that wants
+      # hivescope, so it asks for the extra explicitly.
+      install_extras: 'e2e'
+      pre_install_pip: '"ovoscope" "ovos-core" "ovos-skill-hello-world"'
+      test_path: 'tests/e2e/test_ovos_agent_ovoscope_e2e.py'

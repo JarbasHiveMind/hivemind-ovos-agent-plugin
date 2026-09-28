@@ -1,7 +1,7 @@
 """Tests for OVOSAgentProtocol.handle_send (downstream dispatch from OVOS bus)."""
 
-from ovos_bus_client.message import Message
 from hivemind_bus_client.message import HiveMessage, HiveMessageType
+from ovos_bus_client.message import Message
 
 
 def _send_msg(msg_type, peer=None, payload=None):
@@ -47,6 +47,29 @@ class TestHandleSendDirect:
 
         c1.send.assert_not_called()
         c2.send.assert_not_called()
+
+
+class TestHandleSendStaleClient:
+    def test_direct_send_to_stale_client_does_not_raise(self, agent, make_client):
+        peer = "ws://stale"
+        client = make_client(peer)
+        client.send.side_effect = ConnectionError("closed")
+        agent.hm_protocol.clients = {peer: client}
+
+        agent.handle_send(_send_msg(HiveMessageType.BUS, peer=peer, payload={}))
+
+        client.send.assert_called_once()
+
+    def test_fanout_reaches_live_sibling_when_one_client_is_stale(self, agent, make_client):
+        stale = make_client("ws://stale")
+        stale.send.side_effect = ConnectionError("closed")
+        live = make_client("ws://live")
+        agent.hm_protocol.clients = {"ws://stale": stale, "ws://live": live}
+
+        agent.handle_send(_send_msg(HiveMessageType.PROPAGATE, peer="ws://stale", payload={}))
+
+        stale.send.assert_called_once()
+        live.send.assert_called_once()
 
 
 class TestHandleSendFanout:
