@@ -340,7 +340,32 @@ class OVOSAgentProtocol(AgentProtocol):
         in_session = f" (session {sid})" if isinstance(sid, str) else ""
         warned = False
 
-        if target_peers:
+        # A REQUEST IS NEVER DELIVERED TO A PEER, whatever its destination says.
+        # hivemind-core stamps context["source"] with the peer id it minted for
+        # the connection a request arrived on, so a message whose source names a
+        # CONNECTED peer is that peer's own request travelling to the agent, or
+        # something forwarded from it -- never an answer this relay should send
+        # to somebody. A reply carries the peer in destination and does not
+        # carry a peer in source, because Message.reply() swaps the two.
+        #
+        # Without this test, anything that writes a peer id into destination
+        # after injection -- a transformer, a skill, any other bus writer -- has
+        # the relay deliver one peer's traffic to another peer's socket with
+        # source rewritten to "hive". hivemind-core stops a CLIENT writing that
+        # key (HiveMind-core, T-6673); this stops the same value arriving from
+        # inside the bus, which the node cannot police at injection.
+        #
+        # HIVEMIND-AGENT-1 §3.2 delivers a RESPONSE to the peers its destination
+        # names. A request is not a response.
+        source = message.context.get("source")
+        connected_peers = {peer for peer, _ in connected}
+        is_request_from_a_peer = isinstance(source, str) and source in connected_peers
+
+        if target_peers and is_request_from_a_peer:
+            log.debug("%s - not delivered: source %s is a connected peer, so "
+                      "this is a request and not a response%s",
+                      message.msg_type, source, in_session)
+        elif target_peers:
             unmatched = set(target_peers)
             for peer, client in connected:
                 if peer in target_peers:
