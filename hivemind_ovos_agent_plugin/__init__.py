@@ -357,9 +357,12 @@ class OVOSAgentProtocol(AgentProtocol):
         #
         # HIVEMIND-AGENT-1 §3.2 delivers a RESPONSE to the peers its destination
         # names. A request is not a response.
-        source = message.context.get("source")
+        source = message.context.get("source") or []
+        if not isinstance(source, list):
+            source = [source]
+        source_peers = {s for s in source if isinstance(s, str)}
         connected_peers = {peer for peer, _ in connected}
-        is_request_from_a_peer = isinstance(source, str) and source in connected_peers
+        is_request_from_a_peer = bool(source_peers & connected_peers)
 
         if target_peers and is_request_from_a_peer:
             log.debug("%s - not delivered: source %s is a connected peer, so "
