@@ -414,9 +414,17 @@ class OVOSAgentProtocol(AgentProtocol):
         peer = message.context.get("peer")
         if (not delivered and not warned and isinstance(peer, str)
                 and message.context.get("source") != peer):
-            log.warning("%s - destination %s names no connected peer; "
-                        "response delivered to no peer%s",
-                        message.msg_type, target_peers, in_session)
+            # Two things look exactly like this from here, and only the
+            # sender knows which: a response whose backend never stamped the
+            # peer into destination (non-conformant under §3.2), or traffic
+            # between services inside the hub that carries the peer it was
+            # raised for as provenance. Say so, so the line is not read as a
+            # delivery failure when it is the second.
+            log.warning("%s - destination %s names no connected peer while the "
+                        "context names peer %s: a response that lost its peer "
+                        "destination, or service-to-service traffic carrying the "
+                        "peer as provenance; delivered to no peer%s",
+                        message.msg_type, target_peers, peer, in_session)
 
         # A message that names a target site and no peer reaches neither path
         # above: the peer ids do not match and no client owns the session. It
