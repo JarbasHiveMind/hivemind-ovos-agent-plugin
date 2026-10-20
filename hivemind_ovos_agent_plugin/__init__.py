@@ -1,5 +1,6 @@
 import copy
 import dataclasses
+import uuid
 from threading import Lock
 from collections.abc import Iterator
 from typing import Any
@@ -171,10 +172,43 @@ class OVOSAgentProtocol(AgentProtocol):
                                lang: str) -> "Iterator[str | None]":
         """Answer by injecting the utterance on the OVOS bus and streaming the
         ``speak`` replies until ``ovos.utterance.handled`` (or 10s inactivity),
-        correlated by a fresh query-scoped session so they are not reverse-routed."""
-        import queue
-        import uuid
+        correlated by a fresh query-scoped session so they are not reverse-routed.
+
+        This primitive has no caller identity, so no client policy applies.
+        hivemind-core calls ``answer_query`` instead."""
         qid = uuid.uuid4().hex
+        yield from self._stream_query(utterance, lang, qid,
+                                      {"session_id": qid})
+
+    def answer_query(self, utterance: str, lang: str,
+                     client=None) -> "Iterator[str | None]":
+        """Answer a QUERY/CASCADE for ``client`` under that client's policy.
+
+        The query session carries the same skill and intent blacklists that
+        ``OVOSAgentPolicy`` injects into the client's BUS messages
+        (HIVEMIND-POLICY-1 §3), so a skill blacklisted for the client does not
+        answer its QUERY. On a policy denial or failure this node yields a decline
+        (``None`` first, HIVEMIND-AGENT-1 §3.0) and never injects the utterance.
+        hivemind-core reads a decline as "no answer" and may escalate the QUERY
+        upstream, so the plugin does not promise that no node answers."""
+        qid = uuid.uuid4().hex
+        carrier = Message("recognizer_loop:utterance",
+                          {"utterances": [utterance], "lang": lang},
+                          {"session": {"session_id": qid}})
+        verdict = OVOSAgentPolicy(hm_protocol=self.hm_protocol).review(carrier, client)
+        if verdict.denied:
+            LOG.warning("QUERY from %s not answered: policy %s (%s)",
+                        getattr(client, "peer", None), verdict.code, verdict.reason)
+            yield None
+            return
+        for mutation in verdict.mutations:
+            mutation.apply(carrier, client)
+        yield from self._stream_query(utterance, lang, qid,
+                                      carrier.context["session"])
+
+    def _stream_query(self, utterance: str, lang: str, qid: str,
+                      session: dict[str, Any]) -> "Iterator[str | None]":
+        import queue
         q: queue.Queue = queue.Queue()
 
         def _on_speak(msg):
@@ -208,7 +242,7 @@ class OVOSAgentProtocol(AgentProtocol):
             bus.emit(Message(
                 "recognizer_loop:utterance",
                 {"utterances": [utterance], "lang": lang},
-                {"query_id": qid, "session": {"session_id": qid}},
+                {"query_id": qid, "session": session},
             ))
             while True:
                 try:

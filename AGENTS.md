@@ -27,8 +27,8 @@ for the `HiveMessage`/`HiveMessageType` wire types.
 - Package module: `hivemind_ovos_agent_plugin/` (`__init__.py` — the
   `OVOSAgentProtocol` agent, `policy.py` — mutations and `OVOSAgentPolicy`).
   Tests live in `tests/` (check before adding — do not create a second test
-  directory); `tests/e2e/` and `tests/test_e2e_policy.py` self-skip when the
-  optional `hivescope` dependency isn't importable.
+  directory); `tests/e2e/` and `tests/test_e2e_policy.py` run on the `test`
+  extra, which carries their dependencies.
 - Set up a throwaway environment inside your clone; never touch a shared venv:
   `python3 -m venv .venv && VIRTUAL_ENV=$PWD/.venv uv pip install -e ".[test]" --prerelease=allow`
 - Run the suite in the foreground: `pytest tests/ -v`. It uses `FakeBus` from
@@ -79,8 +79,7 @@ for the `HiveMessage`/`HiveMessageType` wire types.
 - Tests must be mutation-proof: gutting the feature must fail the test. A test
   that only asserts a mock was called, without asserting the real behaviour, is
   weak — note it.
-- Never skip a test because an optional dependency is missing outside the
-  documented `hivescope`/e2e self-skip.
+- Never skip a test because an optional dependency is missing.
 - CI green is permission to review, not to merge. A non-trivial change gets an
   adversarial review before it lands.
 

@@ -10,8 +10,7 @@ jobs:
     uses: OpenVoiceOS/gh-automations/.github/workflows/build-tests.yml@dev
     with:
       python_versions: '["3.10", "3.11", "3.12", "3.13", "3.14"]'
-      # version policy lives in pyproject.toml; just install the test extra
-      # (pytest/pytest-cov only — hivescope is a separate `e2e` extra, see
-      # pyproject.toml, kept out until hivemind-core supports bus-client 1.x).
+      # version policy lives in pyproject.toml; the test extra carries the
+      # e2e dependencies (hivescope, ovoscope, ovos-core, hello-world skill)
       install_extras: 'test'
       test_path: 'tests'

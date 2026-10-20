@@ -18,18 +18,10 @@ reverse-routed to the right satellite by ``handle_internal_mycroft``.
 """
 from __future__ import annotations
 
-from importlib.util import find_spec
 from typing import TYPE_CHECKING
-
-import pytest
 
 if TYPE_CHECKING:
     from hivescope.topology import TopologyBuilder
-
-pytestmark = pytest.mark.skipif(
-    find_spec("hivescope") is None,
-    reason="needs hivescope",
-)
 
 from hivemind_bus_client.message import HiveMessage, HiveMessageType
 from hivemind_plugin_manager.protocols import ClientCallbacks
