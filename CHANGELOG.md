@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.2a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.5.2a1) (2026-10-20)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.5.1a1...0.5.2a1)
+
+**Merged pull requests:**
+
+- fix: apply the client's skill blacklist to QUERY and run the e2e tests in CI [\#79](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/79) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
 ## [0.5.1a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.5.1a1) (2026-09-28)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.5.0a1...0.5.1a1)
