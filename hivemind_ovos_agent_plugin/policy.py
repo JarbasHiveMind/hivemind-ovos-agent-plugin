@@ -8,7 +8,8 @@ that used to live in ``_update_blacklist``, now
 
 These types are OVOS-specific because they manipulate the shape of
 ``message.context["session"]`` (an OVOS ``Session`` serialisation) and
-``recognizer_loop:utterance`` payloads. They live here rather than in
+utterance payloads (``recognizer_loop:utterance`` and ``ovos.utterance.handle``).
+They live here rather than in
 the generic ``hivemind-plugin-manager`` so non-OVOS agents (or
 agent-less HiveMind deployments) don't pull in OVOS-shape assumptions.
 
@@ -108,14 +109,18 @@ class SetContextField(Mutation):
         return None
 
 
+_UTTERANCE_TYPES = ("recognizer_loop:utterance", "ovos.utterance.handle")
+
+
 @dataclass
 class RewriteUtterance(Mutation):
-    """Replace the utterance text in a ``recognizer_loop:utterance``
-    Mycroft message. Silent no-op on any other ``msg_type``."""
+    """Replace the utterance text in a ``recognizer_loop:utterance`` or
+    ``ovos.utterance.handle`` Mycroft message. Silent no-op on any other
+    ``msg_type``."""
     text: str
 
     def apply(self, message, client) -> Any | None:
-        if getattr(message, "msg_type", None) != "recognizer_loop:utterance":
+        if getattr(message, "msg_type", None) not in _UTTERANCE_TYPES:
             return None
         if not isinstance(message.data, dict):
             return None

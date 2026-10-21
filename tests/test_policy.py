@@ -127,6 +127,15 @@ class TestRewriteUtterance(unittest.TestCase):
         self.assertEqual(msg.data["utterances"], ["new"])
         self.assertEqual(msg.data["lang"], "en-us")
 
+    def test_rewrites_ovos_utterance_handle(self):
+        msg = _FakeMessage(
+            "ovos.utterance.handle",
+            data={"utterances": ["old"], "lang": "en-us"},
+        )
+        RewriteUtterance("new").apply(msg, client=None)
+        self.assertEqual(msg.data["utterances"], ["new"])
+        self.assertEqual(msg.data["lang"], "en-us")
+
     def test_noop_for_other_msg_types(self):
         msg = _FakeMessage("speak", data={"utterance": "hi"})
         RewriteUtterance("new").apply(msg, client=None)
