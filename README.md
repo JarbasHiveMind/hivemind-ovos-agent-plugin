@@ -70,7 +70,7 @@ Five concrete `Mutation` subclasses are available for custom policy plugins:
 | `AddBlacklistedIntent` | Append to `session["blacklisted_intents"]` |
 | `SetSessionField` | Set any key in `message.context["session"]` |
 | `SetContextField` | Set a nested path in `message.context` |
-| `RewriteUtterance` | Replace utterance text in `recognizer_loop:utterance` messages |
+| `RewriteUtterance` | Replace utterance text in `recognizer_loop:utterance` and `ovos.utterance.handle` messages |
 
 You can import all these types directly from `hivemind_ovos_agent_plugin`. See [`docs/policy.md`](docs/policy.md) for full details.
 
