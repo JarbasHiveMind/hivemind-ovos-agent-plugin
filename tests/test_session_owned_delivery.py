@@ -79,6 +79,23 @@ def test_service_destination_is_not_delivered_to_the_context_peer(agent, make_cl
     assert any("skills" in m and "NS:s1" in m for m in _warnings(caplog)), _warnings(caplog)
 
 
+def test_the_undelivered_response_warning_says_what_it_can_mean(agent, make_client, caplog):
+    """The §3.3 WARNING for a message with a context peer and no peer in its
+    destination names both readings, the context peer, the destination and
+    the session, so a reader can tell a lost reply from service traffic
+    without the code in front of them."""
+    agent.hm_protocol.db = None
+    alice = _client(make_client, "ws://alice", "NS", ["speak"])
+    agent.hm_protocol.clients = {"ws://alice": alice}
+    with caplog.at_level(logging.WARNING):
+        agent.handle_internal_mycroft(
+            _msg("thalovant.home.request", ["thalovant.home.router"], "NS:s1", peer="ws://alice"))
+    alice.send.assert_not_called()
+    warning = next(m for m in _warnings(caplog) if "thalovant.home.router" in m)
+    assert "ws://alice" in warning and "NS:s1" in warning
+    assert "lost its peer destination" in warning and "provenance" in warning
+
+
 def test_gone_origin_warning_names_the_destination_and_session(agent, make_client, caplog):
     """The origin connection is gone and the destination names no peer. No
     one receives it, a live client on the same namespace is not substituted,
