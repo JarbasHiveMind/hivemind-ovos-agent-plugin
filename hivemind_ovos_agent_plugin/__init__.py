@@ -448,9 +448,9 @@ class OVOSAgentProtocol(AgentProtocol):
         peer = message.context.get("peer")
         if (not delivered and not warned and isinstance(peer, str)
                 and message.context.get("source") != peer):
-            log.warning("%s - destination %s names no connected peer; "
-                        "response delivered to no peer%s",
-                        message.msg_type, target_peers, in_session)
+            log.warning("%s - destination %s names no connected peer "
+                        "(context peer %s); delivered to no peer%s",
+                        message.msg_type, target_peers, peer, in_session)
 
         # A message that names a target site and no peer reaches neither path
         # above: the peer ids do not match and no client owns the session. It
