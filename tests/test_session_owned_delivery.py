@@ -79,6 +79,21 @@ def test_service_destination_is_not_delivered_to_the_context_peer(agent, make_cl
     assert any("skills" in m and "NS:s1" in m for m in _warnings(caplog)), _warnings(caplog)
 
 
+def test_the_undelivered_response_warning_names_destination_peer_and_session(agent, make_client, caplog):
+    """The warning for a message whose destination names no connected peer says
+    where it was addressed, which peer the context carries, and the session."""
+    agent.hm_protocol.db = None
+    alice = _client(make_client, "ws://alice", "NS", ["speak"])
+    agent.hm_protocol.clients = {"ws://alice": alice}
+    with caplog.at_level(logging.WARNING):
+        agent.handle_internal_mycroft(
+            _msg("example.request", ["example.router"], "NS:s1", peer="ws://alice"))
+    alice.send.assert_not_called()
+    warning = next(m for m in _warnings(caplog) if "example.router" in m)
+    assert "ws://alice" in warning and "NS:s1" in warning
+    assert "no connected peer" in warning
+
+
 def test_gone_origin_warning_names_the_destination_and_session(agent, make_client, caplog):
     """The origin connection is gone and the destination names no peer. No
     one receives it, a live client on the same namespace is not substituted,
