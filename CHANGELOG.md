@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.4a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.5.4a1) (2026-11-13)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.5.3a1...0.5.4a1)
+
+**Merged pull requests:**
+
+- fix\(tests\): drop tests/\_\_init\_\_.py so build\_tests imports the wheel [\#72](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/72) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
 ## [0.5.3a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.5.3a1) (2026-10-21)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.5.2a1...0.5.3a1)
@@ -241,6 +249,10 @@
 **Merged pull requests:**
 
 - feat\(policy\): OVOSAgentPolicy + OVOS-specific mutations [\#3](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/3) ([JarbasAl](https://github.com/JarbasAl))
+
+## [0.1.0](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.1.0) (2026-05-18)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/a811218803021c5eb7eac8aadc3bd66d3787bb96...0.1.0)
 
 
 
