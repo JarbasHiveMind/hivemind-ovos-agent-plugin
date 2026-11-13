@@ -103,6 +103,23 @@ class TestARealResponseStillArrives:
 
         victim.send.assert_called_once()
 
+    def test_a_list_valued_source_naming_the_peer_still_blocks(self, agent,
+                                                               make_client):
+        # hivemind_bus_client.protocol.handle_bus does
+        # pload.context["source"] = pload.context.pop("destination"), and a
+        # destination is routinely a list. The guard above tests source with
+        # isinstance(source, str), so a list-valued source fails that test
+        # and the request-vs-response guard above does not run, even though
+        # destination is normalised to a list twelve lines above this guard.
+        attacker = make_client(ATTACKER)
+        agent.hm_protocol.clients = {ATTACKER: attacker}
+
+        agent.handle_internal_mycroft(_ovos_internal(
+            "speak", destination=ATTACKER, source=[ATTACKER], peer=ATTACKER,
+            data={"utterance": "hi"}))
+
+        attacker.send.assert_not_called()
+
     def test_a_source_naming_a_peer_that_is_not_connected_does_not_block(
             self, agent, make_client):
         # The guard tests CONNECTED peers, not the shape of the string. A
