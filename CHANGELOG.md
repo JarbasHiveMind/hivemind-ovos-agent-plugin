@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.5.3a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.5.3a1) (2026-10-21)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.5.2a1...0.5.3a1)
+
+**Merged pull requests:**
+
+- fix: apply RewriteUtterance to ovos.utterance.handle [\#81](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/81) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
+## [0.5.2a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.5.2a1) (2026-10-20)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.5.1a1...0.5.2a1)
+
+**Merged pull requests:**
+
+- fix: apply the client's skill blacklist to QUERY and run the e2e tests in CI [\#79](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/79) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
+## [0.5.1a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.5.1a1) (2026-09-28)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.5.0a1...0.5.1a1)
+
+**Merged pull requests:**
+
+- fix: a request is never delivered to a peer, whatever its destination says [\#73](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/73) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
 ## [0.5.0a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.5.0a1) (2026-09-18)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.4.3a1...0.5.0a1)

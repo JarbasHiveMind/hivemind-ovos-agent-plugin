@@ -30,7 +30,7 @@ All mutations are `@dataclass` subclasses of `hivemind_plugin_manager.Mutation`.
 | `AddBlacklistedIntent` | `intent_name: str` | Appends to `session["blacklisted_intents"]`. No-op if already present. |
 | `SetSessionField` | `key: str`, `value: Any` | Sets `session[key] = value`. |
 | `SetContextField` | `path: Tuple[str, ...]`, `value: Any` | Traverses `message.context` along `path`, creates missing intermediate dicts, then sets the leaf. |
-| `RewriteUtterance` | `text: str` | Replaces `message.data["utterances"]` with `[text]`. Silent no-op on any `msg_type` other than `recognizer_loop:utterance`. |
+| `RewriteUtterance` | `text: str` | Replaces `message.data["utterances"]` with `[text]`. Applies to `recognizer_loop:utterance` and `ovos.utterance.handle`. Silent no-op on any other `msg_type`. |
 
 All five mutations guard against a non-dict `message.context` or `message.context["session"]`. Each coerces the value to an empty dict rather than raising an error. `_ensure_session`, at `hivemind_ovos_agent_plugin/policy.py:29`, is the shared helper that provides this guarantee.
 

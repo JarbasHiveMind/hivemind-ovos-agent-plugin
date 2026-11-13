@@ -1,5 +1,6 @@
 import copy
 import dataclasses
+import uuid
 from threading import Lock
 from collections.abc import Iterator
 from typing import Any
@@ -171,10 +172,43 @@ class OVOSAgentProtocol(AgentProtocol):
                                lang: str) -> "Iterator[str | None]":
         """Answer by injecting the utterance on the OVOS bus and streaming the
         ``speak`` replies until ``ovos.utterance.handled`` (or 10s inactivity),
-        correlated by a fresh query-scoped session so they are not reverse-routed."""
-        import queue
-        import uuid
+        correlated by a fresh query-scoped session so they are not reverse-routed.
+
+        This primitive has no caller identity, so no client policy applies.
+        hivemind-core calls ``answer_query`` instead."""
         qid = uuid.uuid4().hex
+        yield from self._stream_query(utterance, lang, qid,
+                                      {"session_id": qid})
+
+    def answer_query(self, utterance: str, lang: str,
+                     client=None) -> "Iterator[str | None]":
+        """Answer a QUERY/CASCADE for ``client`` under that client's policy.
+
+        The query session carries the same skill and intent blacklists that
+        ``OVOSAgentPolicy`` injects into the client's BUS messages
+        (HIVEMIND-POLICY-1 §3), so a skill blacklisted for the client does not
+        answer its QUERY. On a policy denial or failure this node yields a decline
+        (``None`` first, HIVEMIND-AGENT-1 §3.0) and never injects the utterance.
+        hivemind-core reads a decline as "no answer" and may escalate the QUERY
+        upstream, so the plugin does not promise that no node answers."""
+        qid = uuid.uuid4().hex
+        carrier = Message("recognizer_loop:utterance",
+                          {"utterances": [utterance], "lang": lang},
+                          {"session": {"session_id": qid}})
+        verdict = OVOSAgentPolicy(hm_protocol=self.hm_protocol).review(carrier, client)
+        if verdict.denied:
+            LOG.warning("QUERY from %s not answered: policy %s (%s)",
+                        getattr(client, "peer", None), verdict.code, verdict.reason)
+            yield None
+            return
+        for mutation in verdict.mutations:
+            mutation.apply(carrier, client)
+        yield from self._stream_query(utterance, lang, qid,
+                                      carrier.context["session"])
+
+    def _stream_query(self, utterance: str, lang: str, qid: str,
+                      session: dict[str, Any]) -> "Iterator[str | None]":
+        import queue
         q: queue.Queue = queue.Queue()
 
         def _on_speak(msg):
@@ -208,7 +242,7 @@ class OVOSAgentProtocol(AgentProtocol):
             bus.emit(Message(
                 "recognizer_loop:utterance",
                 {"utterances": [utterance], "lang": lang},
-                {"query_id": qid, "session": {"session_id": qid}},
+                {"query_id": qid, "session": session},
             ))
             while True:
                 try:
@@ -340,7 +374,32 @@ class OVOSAgentProtocol(AgentProtocol):
         in_session = f" (session {sid})" if isinstance(sid, str) else ""
         warned = False
 
-        if target_peers:
+        # A REQUEST IS NEVER DELIVERED TO A PEER, whatever its destination says.
+        # hivemind-core stamps context["source"] with the peer id it minted for
+        # the connection a request arrived on, so a message whose source names a
+        # CONNECTED peer is that peer's own request travelling to the agent, or
+        # something forwarded from it -- never an answer this relay should send
+        # to somebody. A reply carries the peer in destination and does not
+        # carry a peer in source, because Message.reply() swaps the two.
+        #
+        # Without this test, anything that writes a peer id into destination
+        # after injection -- a transformer, a skill, any other bus writer -- has
+        # the relay deliver one peer's traffic to another peer's socket with
+        # source rewritten to "hive". hivemind-core stops a CLIENT writing that
+        # key (HiveMind-core, T-6673); this stops the same value arriving from
+        # inside the bus, which the node cannot police at injection.
+        #
+        # HIVEMIND-AGENT-1 §3.2 delivers a RESPONSE to the peers its destination
+        # names. A request is not a response.
+        source = message.context.get("source")
+        connected_peers = {peer for peer, _ in connected}
+        is_request_from_a_peer = isinstance(source, str) and source in connected_peers
+
+        if target_peers and is_request_from_a_peer:
+            log.debug("%s - not delivered: source %s is a connected peer, so "
+                      "this is a request and not a response%s",
+                      message.msg_type, source, in_session)
+        elif target_peers:
             unmatched = set(target_peers)
             for peer, client in connected:
                 if peer in target_peers:

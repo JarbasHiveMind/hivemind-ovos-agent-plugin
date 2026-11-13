@@ -2,23 +2,14 @@
 OVOS stack (ovoscope's MiniCroft running an actual skill through the full intent
 pipeline), proving the streaming agent contract against genuine skills.
 
-Heavy: boots a real OVOS instance (tens of seconds). Skipped where
-ovoscope/ovos-core/the test skill aren't installed.
+Heavy: boots a real OVOS instance (tens of seconds). Needs ovoscope, ovos-core
+and the test skill, all from the `test` extra.
 """
-from importlib.metadata import entry_points
-
 import pytest
-
-pytest.importorskip("ovoscope")
 
 _SKILL = "ovos-skill-hello-world.openvoiceos"
 
 
-def _has_skill():
-    return _SKILL in [e.name for e in entry_points(group="opm.skill")]
-
-
-@pytest.mark.skipif(not _has_skill(), reason="needs ovos-skill-hello-world")
 @pytest.mark.slow
 def test_ovos_agent_answers_via_real_skill():
     from ovoscope import get_minicroft

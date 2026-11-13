@@ -23,10 +23,6 @@ from __future__ import annotations
 
 import time
 
-import pytest
-
-pytest.importorskip("hivescope")
-
 from hivemind_bus_client.message import HiveMessage, HiveMessageType
 from hivescope.topology import TopologyBuilder
 from ovos_bus_client.message import Message
@@ -321,3 +317,133 @@ def test_no_blacklist_injects_nothing_extra():
         )
     finally:
         b.stop_all()
+
+
+# ---------------------------------------------------------------------------
+# (c) The client's blacklist applies to QUERY as it does to BUS
+# ---------------------------------------------------------------------------
+
+BLACKLISTED_SKILL = "ovos-skill-hello-world.openvoiceos"
+
+
+def _skill_honouring_session_blacklist(agent, answer: str):
+    """Answer an utterance unless its session blacklists the skill, as
+    ovos-core's intent service does."""
+    def _responder(msg: Message):
+        session = msg.context.get("session") or {}
+        if BLACKLISTED_SKILL in session.get("blacklisted_skills", []):
+            agent.bus.emit(msg.reply("ovos.intent.unmatched", {}))
+            return
+        agent.bus.emit(msg.reply("speak", {"utterance": answer}))
+        agent.bus.emit(msg.reply("ovos.utterance.handled", {}))
+    agent.bus.on("recognizer_loop:utterance", _responder)
+
+
+def _hub_with_client(skill_blacklist):
+    from hivemind_ovos_agent_plugin import OVOSAgentProtocol
+    from tests.e2e.test_hivescope_topology_e2e import _make_agent
+
+    agent: OVOSAgentProtocol = _make_agent()
+    _skill_honouring_session_blacklist(agent, "hello from the skill")
+    b = TopologyBuilder()
+    m = b.add_master("M0", agent_protocol=agent)
+    b.add_satellite("S0", upstream=m, is_admin=False,
+                    allowed_types=["recognizer_loop:utterance"],
+                    skill_blacklist=skill_blacklist)
+    b.start_all()
+    _swap_chain(m, [{"module": "hivemind-ovos-agent-policy"}])
+    return b, b.get_satellite("S0")
+
+
+def _spoken(satellite, msg_type: HiveMessageType) -> list[str]:
+    from tests.e2e.test_hivescope_topology_e2e import _speak_texts
+
+    return _speak_texts(satellite.recorder.received(msg_type.value, direction="in"))
+
+
+def _query(satellite, query_id: str):
+    inner = HiveMessage(HiveMessageType.BUS,
+                        payload=Message("recognizer_loop:utterance",
+                                        {"utterances": ["hello"]}))
+    satellite.send(HiveMessage(HiveMessageType.QUERY, payload=inner,
+                               metadata={"query_id": query_id,
+                                         "originator_peer": satellite.peer}))
+
+
+def test_query_does_not_reach_a_blacklisted_skill():
+    """A QUERY from a client with a skill blacklist must not be answered by
+    that skill (POLICY-1 §3: the mutations apply before the backend sees the
+    message)."""
+    b, s = _hub_with_client([BLACKLISTED_SKILL])
+    try:
+        _query(s, "q-blacklisted")
+        assert _wait_for(lambda: s.recorder.received(
+            HiveMessageType.QUERY.value, direction="in"), timeout=12.0), \
+            "no QUERY response at all"
+        assert _spoken(s, HiveMessageType.QUERY) == []
+    finally:
+        b.stop_all()
+
+
+def test_bus_does_not_reach_a_blacklisted_skill():
+    b, s = _hub_with_client([BLACKLISTED_SKILL])
+    try:
+        _send_utterance(s, _ctx_for(s))
+        time.sleep(1.0)
+        assert _spoken(s, HiveMessageType.BUS) == []
+    finally:
+        b.stop_all()
+
+
+def test_query_and_bus_reach_the_skill_without_a_blacklist():
+    b, s = _hub_with_client([])
+    try:
+        _query(s, "q-open")
+        _send_utterance(s, _ctx_for(s))
+        assert _wait_for(lambda: _spoken(s, HiveMessageType.QUERY)
+                         and _spoken(s, HiveMessageType.BUS), timeout=12.0)
+        assert "hello from the skill" in _spoken(s, HiveMessageType.QUERY)
+        assert "hello from the skill" in _spoken(s, HiveMessageType.BUS)
+    finally:
+        b.stop_all()
+
+
+# ---------------------------------------------------------------------------
+# (d) A failed policy review declines the QUERY and never reaches the backend
+# ---------------------------------------------------------------------------
+
+def _agent_recording_utterances(db):
+    from types import SimpleNamespace
+
+    from tests.e2e.test_hivescope_topology_e2e import _make_agent
+
+    agent = _make_agent()
+    agent.hm_protocol = SimpleNamespace(db=db, clients={})
+    received: list[Message] = []
+    agent.bus.on("recognizer_loop:utterance", received.append)
+    return agent, received
+
+
+def test_query_declines_when_the_user_lookup_fails():
+    from types import SimpleNamespace
+
+    def _broken_lookup(db):
+        raise RuntimeError("database unreachable")
+
+    client = SimpleNamespace(peer="p1", is_admin=False,
+                             resolve_user=_broken_lookup)
+    agent, received = _agent_recording_utterances(db=object())
+
+    chunks = list(agent.answer_query("hello", "en-US", client=client))
+
+    assert chunks[0] is None
+    assert received == []
+
+
+def test_query_without_a_client_declines_when_the_hub_has_a_database():
+    agent, received = _agent_recording_utterances(db=object())
+
+    chunks = list(agent.answer_query("hello", "en-US", client=None))
+
+    assert chunks[0] is None
+    assert received == []
