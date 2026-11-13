@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.5a2](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.5.5a2) (2026-11-13)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.5.5a1...0.5.5a2)
+
+**Merged pull requests:**
+
+- test\(e2e\): two satellites, neither can reach the other's connection [\#75](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/75) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
 ## [0.5.5a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.5.5a1) (2026-11-13)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.5.4a1...0.5.5a1)
