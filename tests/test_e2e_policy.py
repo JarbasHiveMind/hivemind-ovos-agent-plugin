@@ -341,7 +341,7 @@ def _skill_honouring_session_blacklist(agent, answer: str):
 
 def _hub_with_client(skill_blacklist):
     from hivemind_ovos_agent_plugin import OVOSAgentProtocol
-    from tests.e2e.test_hivescope_topology_e2e import _make_agent
+    from e2e.test_hivescope_topology_e2e import _make_agent
 
     agent: OVOSAgentProtocol = _make_agent()
     _skill_honouring_session_blacklist(agent, "hello from the skill")
@@ -356,7 +356,7 @@ def _hub_with_client(skill_blacklist):
 
 
 def _spoken(satellite, msg_type: HiveMessageType) -> list[str]:
-    from tests.e2e.test_hivescope_topology_e2e import _speak_texts
+    from e2e.test_hivescope_topology_e2e import _speak_texts
 
     return _speak_texts(satellite.recorder.received(msg_type.value, direction="in"))
 
@@ -415,7 +415,7 @@ def test_query_and_bus_reach_the_skill_without_a_blacklist():
 def _agent_recording_utterances(db):
     from types import SimpleNamespace
 
-    from tests.e2e.test_hivescope_topology_e2e import _make_agent
+    from e2e.test_hivescope_topology_e2e import _make_agent
 
     agent = _make_agent()
     agent.hm_protocol = SimpleNamespace(db=db, clients={})
