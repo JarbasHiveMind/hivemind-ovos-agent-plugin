@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.5a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.5.5a1) (2026-11-13)
+
+[Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.5.4a1...0.5.5a1)
+
+**Merged pull requests:**
+
+- fix: name the context peer in the undelivered-response warning [\#77](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/77) ([goldyfruit](https://github.com/goldyfruit))
+- fix: normalise source to a list in the request guard [\#76](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/pull/76) ([openvoiceos-bot](https://github.com/openvoiceos-bot))
+
 ## [0.5.4a1](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/tree/0.5.4a1) (2026-11-13)
 
 [Full Changelog](https://github.com/JarbasHiveMind/hivemind-ovos-agent-plugin/compare/0.5.3a1...0.5.4a1)
