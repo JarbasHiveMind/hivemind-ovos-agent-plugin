@@ -1,6 +1,6 @@
 # Configuration
 
-The plugin is configured by the `hivemind-core` `agent_protocol` block.
+The `hivemind-core` `agent_protocol` block configures the plugin.
 
 ```json
 {
@@ -17,20 +17,14 @@ The plugin is configured by the `hivemind-core` `agent_protocol` block.
 
 | Key    | Type   | Default        | Description                                         |
 |--------|--------|----------------|-----------------------------------------------------|
-| `host` | string | `127.0.0.1`    | Hostname or IP of the OVOS messagebus.              |
-| `port` | int    | `8181`         | TCP port of the OVOS messagebus.                    |
+| `host` | string | `127.0.0.1`    | Hostname or IP of the OVOS message bus.             |
+| `port` | int    | `8181`         | TCP port of the OVOS message bus.                   |
 
-If no `host`/`port` are supplied, the plugin falls back to the
-`websocket` section of the global OVOS `Configuration()`, which is also the standard
-location for OVOS bus client settings. This means an OVOS install that already has
-`mycroft.conf` configured will work without any extra config in `hivemind-core`.
+If you supply no `host` or `port`, the plugin falls back to the `websocket` section of the global OVOS `Configuration()`, which is also the standard location for OVOS bus client settings. This means an OVOS install that already has `mycroft.conf` configured works without any extra config in `hivemind-core`.
 
 ## Reusing an existing bus connection
 
-If you instantiate `OVOSAgentProtocol` programmatically and pass a non-default `bus`
-argument, the plugin will skip its own bus-client setup and use the one you supply.
-This is useful for tests and for OVOS deployments that already manage their own bus
-client lifecycle.
+If you create `OVOSAgentProtocol` programmatically and pass a non-default `bus` argument, the plugin skips its own bus-client setup and uses the one you supply. This is useful for tests and for OVOS deployments that already manage their own bus client lifecycle.
 
 ```python
 from ovos_bus_client import MessageBusClient
@@ -43,10 +37,11 @@ bus.connected_event.wait()
 agent = OVOSAgentProtocol(bus=bus)
 ```
 
-`hivemind-core` does not currently expose a way to inject a custom bus instance; that
-path is for advanced/embedded use only.
+`hivemind-core` does not currently expose a way to inject a custom bus instance. That path is for advanced or embedded use only.
 
 ## OVOS config interaction
 
-When the plugin falls back to `Configuration().get("websocket", {})` it reads the
-same keys OVOS itself reads. There is no separate "hivemind" section in `mycroft.conf`.
+When the plugin falls back to `Configuration().get("websocket", {})`, it reads the same keys OVOS itself reads. There is no separate "hivemind" section in `mycroft.conf`.
+
+---
+[← Architecture](architecture.md) · [Home](README.md) · [Message flow →](message_flow.md)
